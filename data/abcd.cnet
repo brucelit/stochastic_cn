@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<cnet><net type="http://www.processmining.org" id="" /><name>Causal net (C-net) @ 26/01/2025 10:44:16 AM</name>
+<node id="0" isInvisible="false"><name>ARTIFICIAL_END</name></node>
+<node id="1" isInvisible="false"><name>D</name></node>
+<node id="2" isInvisible="false"><name>C</name></node>
+<node id="3" isInvisible="false"><name>ARTIFICIAL_START</name></node>
+<node id="4" isInvisible="false"><name>B</name></node>
+<node id="5" isInvisible="false"><name>A</name></node>
+<startTaskNode id="3"/>
+<endTaskNode id="0"/>
+<inputNode id="0"><inputSet><node id="1" /></inputSet></inputNode>
+<inputNode id="1"><inputSet><node id="4" /></inputSet><inputSet><node id="2" /></inputSet><inputSet><node id="4" /><node id="2" /></inputSet></inputNode>
+<outputNode id="1"><outputSet><node id="0" /></outputSet></outputNode>
+<inputNode id="2"><inputSet><node id="5" /></inputSet></inputNode><outputNode id="2"><outputSet><node id="1" /></outputSet></outputNode><outputNode id="3"><outputSet><node id="5" /></outputSet></outputNode>
+<inputNode id="4"><inputSet><node id="5" /></inputSet></inputNode>
+<outputNode id="4"><outputSet><node id="1" /></outputSet></outputNode>
+<inputNode id="5"><inputSet><node id="3" /></inputSet></inputNode>
+<outputNode id="5"><outputSet><node id="4" /></outputSet><outputSet><node id="2" /></outputSet><outputSet><node id="4" /><node id="2" /></outputSet></outputNode>
+<arc id="6" source="1" target="0" />
+<arc id="7" source="1" target="0" />
+<arc id="8" source="2" target="1" />
+<arc id="9" source="4" target="1" />
+<arc id="10" source="2" target="1" />
+<arc id="11" source="5" target="2" />
+<arc id="12" source="3" target="5" />
+<arc id="13" source="4" target="1" />
+<arc id="14" source="5" target="4" />
+<arc id="15" source="5" target="4" />
+<arc id="16" source="5" target="2" />
+<arc id="17" source="3" target="5" />
+</cnet>
