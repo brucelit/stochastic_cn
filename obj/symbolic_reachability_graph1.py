@@ -1,41 +1,38 @@
-"""
-Causal Net Reachability Graph Generator
-
-This module constructs and visualizes the complete reachability graph (state space)
-for a weighted causal net based on the obligations semantics.
-"""
-import copy
+from collections import deque
 import networkx as nx
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
-from collections import deque
-from typing import Dict, Tuple, Set, List, Any
-from causal_net import CausalNet, State, Binding, Semantics, Obligation
-from util.cn_importer import import_cnet_from_xml
+from typing import Dict, Tuple, Any
+
+from symbolic_causal_net import SymbolicCausalNet, State, Semantics, Obligation, import_symbolic_causal_net_from_xml
 
 
-class ReachabilityGraph:
+class SymbolicReachabilityGraph:
     """
-    Class for generating and visualizing the reachability graph of a causal net.
+    Class for generating and analyzing the reachability graph of a Causal-net.
     """
 
-    def __init__(self, weighted_causal_net: CausalNet):
+    def __init__(self, scn: SymbolicCausalNet):
         """
-        Initialize with a causal net.
+        Initialize the reachability graph.
 
         Args:
-            causal_net: CausalNet object representing the process model
+            semantics: CausalNetSemantics object
         """
-        self.causal_net = weighted_causal_net
-        self.semantics = Semantics(weighted_causal_net)
-        self.graph = nx.DiGraph()  # Directed graph to represent the reachability graph
+        self.stochastic_causal_net = scn
+        self.semantics = Semantics(scn)
+        self.graph = nx.DiGraph()
+        self.state_mapping = {}  # Maps state strings to indices
+        self.transitions = []  # List of transitions (source_state, target_state, activity, probability)
 
-    def _state_to_str(self, state: State) -> str:
+    def _state_to_str(self, state):
         """
-        Convert a state to a string representation that can be used as a node identifier.
+        Convert a State object to a string representation.
 
         Args:
-            state: State object with obligations
+            state: State object
 
         Returns:
             String representation of the state
@@ -43,13 +40,10 @@ class ReachabilityGraph:
         if state.is_empty():
             return "∅"
 
-        # Sort obligations for consistent representation
-        obligations = []
-        for obligation, count in sorted(state.obligations.items(),
-                                        key=lambda x: (x[0].source, x[0].target)):
-            obligations.append(f"{obligation.source}→{obligation.target}:{count}")
+        obligations = state.get_all_obligations()
+        sorted_obligations = sorted(obligations, key=lambda o: (o.source, o.target))
+        return ", ".join(str(obligation) for obligation in sorted_obligations)
 
-        return "{" + ", ".join(obligations) + "}"
 
     def _str_to_state(self, state_str: str) -> State:
         """
@@ -84,6 +78,7 @@ class ReachabilityGraph:
 
         return state
 
+
     def generate_reachability_graph(self, max_depth: int = 50) -> nx.DiGraph:
         """
         Generate the reachability graph for the causal net.
@@ -98,13 +93,15 @@ class ReachabilityGraph:
         initial_state = self.semantics.initial_state()
         initial_state_str = self._state_to_str(initial_state)
 
-
         # Add initial state to the graph
         self.graph.add_node(initial_state_str, state=initial_state, label=initial_state_str)
+        self.state_mapping[initial_state_str] = 0  # Initial state gets index 0
 
         # Use BFS to explore all reachable states
         queue = deque([(initial_state, initial_state_str, 0)])  # (state, state_str, depth)
         visited = {initial_state_str}
+
+        state_index = 1  # Counter for state indices
 
         while queue:
             current_state, current_state_str, depth = queue.popleft()
@@ -117,8 +114,10 @@ class ReachabilityGraph:
             enabled_bindings = self.semantics.get_enabled_bindings(current_state)
 
             # Process each enabled binding
-            for binding in enabled_bindings:
-                edge_label = f"{binding.activity}"
+            for binding, probability in enabled_bindings.items():
+                if probability == "":
+                    probability = str(1)
+                edge_label = f"{binding.activity}\np={probability}"
 
                 # Execute the binding to get the next state
                 try:
@@ -128,6 +127,8 @@ class ReachabilityGraph:
                     # Add the new state to the graph if not seen before
                     if next_state_str not in visited:
                         self.graph.add_node(next_state_str, state=next_state, label=next_state_str)
+                        self.state_mapping[next_state_str] = state_index
+                        state_index += 1
                         visited.add(next_state_str)
                         queue.append((next_state, next_state_str, depth + 1))
 
@@ -140,13 +141,96 @@ class ReachabilityGraph:
                                         binding=binding,
                                         label_pos=1,
                                         activity=binding.activity,
+                                        probability=probability,
                                         label=edge_label)
+
+                    # Store transition information
+                    self.transitions.append((
+                        self.state_mapping[current_state_str],
+                        self.state_mapping[next_state_str],
+                        binding.activity,
+                        probability
+                    ))
 
                 except ValueError as e:
                     print(f"Error executing binding {binding}: {e}")
+
         return self.graph
 
-    def visualize(self, output_file: str = None, figsize: Tuple[int, int] = (12, 8)):
+    def generate_incidence_matrix(self):
+        """
+        Generate the incidence matrix for the reachability graph.
+
+        The incidence matrix shows the transitions between states:
+        - Rows represent source states
+        - Columns represent target states
+        - Cells contain the activity and probability of the transition
+
+        Returns:
+            pandas.DataFrame containing the incidence matrix
+        """
+        # Get the number of states
+        num_states = len(self.state_mapping)
+
+        # Create a matrix of empty strings
+        matrix = np.empty((num_states, num_states), dtype=object)
+        matrix.fill('0')
+
+        # Fill the matrix with transition information
+        for source_idx, target_idx, activity, probability in self.transitions:
+            if matrix[source_idx, target_idx] == '':
+                matrix[source_idx, target_idx] = probability
+            else:
+                matrix[source_idx, target_idx] += probability
+
+        # Create reverse mapping from index to state string
+        reverse_mapping = {idx: state for state, idx in self.state_mapping.items()}
+
+        # Create a DataFrame with state labels
+        df = pd.DataFrame(
+            matrix,
+            index=[reverse_mapping[i] for i in range(num_states)],
+            columns=[reverse_mapping[i] for i in range(num_states)]
+        )
+
+        return df
+
+
+    def get_parameter_incidence_matrix(self):
+        """
+        Generate an incidence matrix with parameter names instead of concrete probabilities.
+        This is useful when working with symbolic parameters.
+
+        Returns:
+            pandas.DataFrame: The incidence matrix with parameter names
+        """
+        # Get the number of states
+        num_states = len(self.state_mapping)
+
+        # Create a matrix of empty strings
+        matrix = np.empty((num_states, num_states), dtype=object)
+        matrix.fill('1')
+
+        # Fill the matrix with parameter information
+        for source_idx, target_idx, activity, probability in self.transitions:
+            if matrix[source_idx, target_idx] == '':
+                matrix[source_idx, target_idx] = probability
+            else:
+                matrix[source_idx, target_idx] += probability
+
+        # Create reverse mapping from index to state string
+        reverse_mapping = {idx: state for state, idx in self.state_mapping.items()}
+
+        # Create a DataFrame with state labels
+        df = pd.DataFrame(
+            matrix,
+            index=[reverse_mapping[i] for i in range(num_states)],
+            columns=[reverse_mapping[i] for i in range(num_states)]
+        )
+
+        return df
+
+    def visualize(self, output_file: str = None, fig_size: Tuple[int, int] = (12, 8)):
         """
         Visualize the reachability graph.
 
@@ -154,7 +238,7 @@ class ReachabilityGraph:
             output_file: Optional file path to save the visualization
             figsize: Figure size as (width, height) tuple
         """
-        plt.figure(figsize=figsize)
+        plt.figure(figsize=fig_size)
 
         # Use hierarchical layout for better visualization
         pos = nx.spectral_layout(self.graph)
@@ -200,95 +284,36 @@ class ReachabilityGraph:
 
         plt.show()
 
-    def export_to_dot(self, output_file: str = None) -> str:
-        """
-        Export the reachability graph to DOT format for use with Graphviz.
-
-        Args:
-            output_file: Optional file path to save the DOT file
-
-        Returns:
-            DOT representation as a string
-        """
-        # Create a DOT representation
-        dot = ['digraph ReachabilityGraph {',
-               '  rankdir=LR;',
-               '  node [shape=ellipse, style=filled];']
-
-        # Initial node (green)
-        initial_node = self._state_to_str(self.semantics.initial_state())
-        dot.append(f'  "{initial_node}" [fillcolor=green, label="{initial_node}"];')
-
-        # Find final nodes (no outgoing edges)
-        final_nodes = [node for node, out_degree in self.graph.out_degree() if out_degree == 0]
-        for node in final_nodes:
-            dot.append(f'  "{node}" [fillcolor=orange, label="{node}"];')
-
-        # Regular nodes (blue)
-        regular_nodes = [node for node in self.graph.nodes()
-                         if node != initial_node and node not in final_nodes]
-        for node in regular_nodes:
-            dot.append(f'  "{node}" [fillcolor=lightblue, label="{node}"];')
-
-        # Add edges
-        for u, v, data in self.graph.edges(data=True):
-            edge_label = data.get('label', '').replace('\n', '\\n')
-            dot.append(f'  "{u}" -> "{v}" [label="{edge_label}"];')
-
-        dot.append('}')
-        dot_content = '\n'.join(dot)
-
-        if output_file:
-            with open(output_file, 'w') as f:
-                f.write(dot_content)
-            print(f"Exported DOT file to {output_file}")
-
-        return dot_content
-
-    def get_state_space_info(self) -> Dict[str, Any]:
-        """
-        Get information about the state space.
-
-        Returns:
-            Dictionary with state space information
-        """
-        info = {
-            'num_states': len(self.graph.nodes()),
-            'num_transitions': len(self.graph.edges()),
-            'initial_state': self._state_to_str(self.semantics.initial_state()),
-            'final_states': [node for node, out_degree in self.graph.out_degree() if out_degree == 0],
-            'deadlock_states': [node for node, out_degree in self.graph.out_degree()
-                                if out_degree == 0 and node not in self._state_to_str(self.semantics.initial_state())]
-        }
-        return info
-
-
+# Example usage
 def example_reachability_graph():
-    """
-    Create and visualize a reachability graph for an example causal net.
-    """
     # Create a simple Weighted C-net
-    cnet = import_cnet_from_xml("../data/abbc.cnet")
+    symbolic_cn = import_symbolic_causal_net_from_xml("../data/road_heuristic.cnet")
+    symbolic_cn.assign_parameterized_weights()
 
     # Create the reachability graph
-    reachability = ReachabilityGraph(cnet)
-    reachability.generate_reachability_graph()
+    symbolic_rg = SymbolicReachabilityGraph(symbolic_cn)
+    symbolic_rg.generate_reachability_graph()
 
-    # Print information about the state space
-    state_space_info = reachability.get_state_space_info()
-    print("State Space Information:")
-    print(f"Number of States: {state_space_info['num_states']}")
-    print(f"Number of Transitions: {state_space_info['num_transitions']}")
-    print(f"Initial State: {state_space_info['initial_state']}")
-    print(f"Final States: {state_space_info['final_states']}")
 
-    # Visualize the reachability graph
-    reachability.visualize(output_file="causal_net_reachability.png")
+    # Generate incidence matrix
+    incidence_matrix = symbolic_rg.generate_incidence_matrix()
+    print("\nIncidence Matrix (with activities and probabilities):")
+    print(incidence_matrix)
+    incidence_matrix.to_csv("../data/incidence.csv")
 
-    # Export to DOT format
-    # reachability.export_to_dot(output_file="causal_net_reachability.dot")
-    # print("To visualize with Graphviz, run: dot -Tpng causal_net_reachability.dot -o reachability_graphviz.png")
+    # Generate parameter incidence matrix
+    param_matrix = symbolic_rg.get_parameter_incidence_matrix()
+    print("\nParameter Incidence Matrix:")
+    print(param_matrix)
+
+    # Print state mapping
+    print("\nState Mapping:")
+    for state_str, idx in symbolic_rg.state_mapping.items():
+        print(f"State {idx}: {state_str}")
+
+    return symbolic_rg
 
 
 if __name__ == "__main__":
-    example_reachability_graph()
+    symbolic_rg = example_reachability_graph()
+    symbolic_rg.visualize()

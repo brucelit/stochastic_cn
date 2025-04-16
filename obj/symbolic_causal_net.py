@@ -1,3 +1,5 @@
+import xml.etree.ElementTree as ET
+
 from typing import Set, List
 from collections import defaultdict, Counter
 
@@ -128,9 +130,9 @@ class BindingSequence:
         return " → ".join(str(binding) for binding in self.bindings)
 
 
-class WeightedCausalNet:
+class SymbolicCausalNet:
     """
-    A Weighted Causal-net (WC-net) implementation representing process models.
+    A Stochastic Causal-net (WC-net) implementation representing process models.
 
     A WC-net extends a C-net by adding weights to input and output bindings,
     which can be used to calculate probabilities for different execution paths.
@@ -138,7 +140,7 @@ class WeightedCausalNet:
 
     def __init__(self, start_activity: str, end_activity: str):
         """
-        Initialize a Weighted Causal-net.
+        Initialize a Stochastic Causal-net.
 
         Args:
             start_activity: The activity that starts the process
@@ -168,17 +170,16 @@ class WeightedCausalNet:
         # Start activity has no input bindings
         empty_set = frozenset()
         self.input_bindings[start_activity].add(empty_set)
-        self.input_binding_weights[start_activity][empty_set] = 1.0
-
         # End activity has no output bindings
         self.output_bindings[end_activity].add(empty_set)
-        self.output_binding_weights[end_activity][empty_set] = 1.0
+        self.param_mapping = self.assign_parameterized_weights()
+
 
     def add_activity(self, activity: str) -> None:
         """Add an activity to the WC-net."""
         self.activities.add(activity)
 
-    def add_input_binding(self, activity: str, binding: Set[str], weight: float = 1.0) -> None:
+    def add_input_binding(self, activity: str, binding: Set[str]) -> None:
         """
         Add an input binding for an activity with a weight.
 
@@ -190,9 +191,6 @@ class WeightedCausalNet:
         if activity == self.start_activity:
             raise ValueError("Start activity cannot have input bindings")
 
-        if weight < 0:
-            raise ValueError("Weight must be non-negative")
-
         # Ensure all activities in the binding exist
         for act in binding:
             if act not in self.activities:
@@ -200,9 +198,8 @@ class WeightedCausalNet:
 
         binding_frozenset = frozenset(binding)
         self.input_bindings[activity].add(binding_frozenset)
-        self.input_binding_weights[activity][binding_frozenset] = weight
 
-    def add_output_binding(self, activity: str, binding: Set[str], weight: float = 1.0) -> None:
+    def add_output_binding(self, activity: str, binding: Set[str]) -> None:
         """
         Add an output binding for an activity with a weight.
 
@@ -214,9 +211,6 @@ class WeightedCausalNet:
         if activity == self.end_activity:
             raise ValueError("End activity cannot have output bindings")
 
-        if weight < 0:
-            raise ValueError("Weight must be non-negative")
-
         # Ensure all activities in the binding exist
         for act in binding:
             if act not in self.activities:
@@ -224,45 +218,44 @@ class WeightedCausalNet:
 
         binding_frozenset = frozenset(binding)
         self.output_bindings[activity].add(binding_frozenset)
-        self.output_binding_weights[activity][binding_frozenset] = weight
 
-    def update_input_binding_weight(self, activity: str, binding: Set[str], weight: float) -> None:
-        """
-        Update the weight of an existing input binding.
+    # def update_input_binding_weight(self, activity: str, binding: Set[str], weight=1.0) -> None:
+    #     """
+    #     Update the weight of an existing input binding.
+    #
+    #     Args:
+    #         activity: The target activity
+    #         binding: The input binding to update
+    #         weight: The new weight
+    #     """
+    #     if weight < 0:
+    #         raise ValueError("Weight must be non-negative")
+    #
+    #     binding_frozenset = frozenset(binding)
+    #     if binding_frozenset not in self.input_bindings[activity]:
+    #         raise ValueError(f"Input binding {binding} does not exist for activity {activity}")
+    #
+    #     self.input_binding_weights[activity][binding_frozenset] = weight
+    #
+    # def update_output_binding_weight(self, activity: str, binding: Set[str], weight) -> None:
+    #     """
+    #     Update the weight of an existing output binding.
+    #
+    #     Args:
+    #         activity: The source activity
+    #         binding: The output binding to update
+    #         weight: The new weight
+    #     """
+    #     if weight < 0:
+    #         raise ValueError("Weight must be non-negative")
+    #
+    #     binding_frozenset = frozenset(binding)
+    #     if binding_frozenset not in self.output_bindings[activity]:
+    #         raise ValueError(f"Output binding {binding} does not exist for activity {activity}")
 
-        Args:
-            activity: The target activity
-            binding: The input binding to update
-            weight: The new weight
-        """
-        if weight < 0:
-            raise ValueError("Weight must be non-negative")
+        # self.output_binding_weights[activity][binding_frozenset] = weight
 
-        binding_frozenset = frozenset(binding)
-        if binding_frozenset not in self.input_bindings[activity]:
-            raise ValueError(f"Input binding {binding} does not exist for activity {activity}")
-
-        self.input_binding_weights[activity][binding_frozenset] = weight
-
-    def update_output_binding_weight(self, activity: str, binding: Set[str], weight: float) -> None:
-        """
-        Update the weight of an existing output binding.
-
-        Args:
-            activity: The source activity
-            binding: The output binding to update
-            weight: The new weight
-        """
-        if weight < 0:
-            raise ValueError("Weight must be non-negative")
-
-        binding_frozenset = frozenset(binding)
-        if binding_frozenset not in self.output_bindings[activity]:
-            raise ValueError(f"Output binding {binding} does not exist for activity {activity}")
-
-        self.output_binding_weights[activity][binding_frozenset] = weight
-
-    def get_input_binding_weight(self, activity: str, binding: frozenset[str]) -> float:
+    def get_input_binding_weight(self, activity: str, binding: frozenset[str]) -> str:
         """
         Get the weight of an input binding.
 
@@ -278,7 +271,7 @@ class WeightedCausalNet:
 
         return self.input_binding_weights[activity][binding]
 
-    def get_output_binding_weight(self, activity: str, binding: frozenset[str]) -> float:
+    def get_output_binding_weight(self, activity: str, binding: frozenset[str]) -> str:
         """
         Get the weight of an output binding.
 
@@ -292,7 +285,6 @@ class WeightedCausalNet:
         binding_frozenset = frozenset(binding)
         if binding_frozenset not in self.output_bindings[activity]:
             raise ValueError(f"Output binding {binding} does not exist for activity {activity}")
-
         return self.output_binding_weights[activity][binding_frozenset]
 
     def get_successors(self, activity: str) -> Set[str]:
@@ -309,7 +301,7 @@ class WeightedCausalNet:
             predecessors.update(binding)
         return predecessors
 
-    def get_total_output_binding_weight(self, activity: str) -> float:
+    def get_total_output_binding_weight(self, activity: str) -> str:
         """
         Calculate the total weight of all output bindings for an activity.
 
@@ -321,17 +313,18 @@ class WeightedCausalNet:
         """
         # No output bindings for end activity
         if activity == self.end_activity:
-            return 0.0
+            return str(1.0)
 
         # Calculate the sum of weights for all output bindings
-        total_weight = sum(self.output_binding_weights[activity][binding]
-                           for binding in self.output_bindings[activity])
+        total_weight = ""
+        for binding in self.output_bindings[activity]:
+            total_weight += self.output_binding_weights[activity][binding]
+            total_weight += "+"
+        return total_weight[:-1]
 
-        return total_weight
-
-    def get_total_input_binding_weight(self, activity: str) -> float:
+    def get_total_input_binding_weight(self, activity: str) -> str:
         """
-        Calculate the total weight of all input bindings for an activity.
+        Calculate the symbolic total weight of all input bindings for an activity.
 
         Args:
             activity: The activity to calculate total input weight for
@@ -340,15 +333,100 @@ class WeightedCausalNet:
             The sum of weights of all input bindings
         """
         # No input bindings for start activity
-        if activity == self.start_activity:
-            return 0.0
 
         # Calculate the sum of weights for all input bindings
-        total_weight = sum(self.input_binding_weights[activity][binding]
-                           for binding in self.input_bindings[activity])
+        # total_weight = sum(self.input_binding_weights[activity][binding]
+        #                    for binding in self.input_bindings[activity])
+        total_weight = ""
+        for binding in self.input_bindings[activity]:
+            total_weight += self.input_binding_weights[activity][binding]
+            total_weight += "+"
+        return total_weight[:-1]
 
-        return total_weight
+    def assign_parameterized_weights(self):
+        """
+        Assigns symbolic weight parameters to input and output bindings in a Weighted Causal-net.
 
+        Input binding weights are assigned parameters i0, i1, i2, etc.
+        Output binding weights are assigned parameters o0, o1, o2, etc.
+
+        Args:
+            symbolic_causal_net: A WeightedCausalNet object
+
+        Returns:
+            Dictionary mapping parameter names to their corresponding bindings
+        """
+        # Initialize parameter counters
+        input_param_counter = 0
+        output_param_counter = 0
+
+        # Dictionary to track parameter assignments
+        param_mapping = {
+            'input': {},  # Format: {param_name: (activity, binding)}
+            'output': {}  # Format: {param_name: (activity, binding)}
+        }
+
+        # Process input bindings for all activities except start
+        for activity in self.activities:
+            if activity == self.start_activity:
+                continue  # Skip start activity as it has no input bindings
+
+            for binding in self.input_bindings[activity]:
+                # Create parameter name
+                param_name = f"i{input_param_counter}"
+                input_param_counter += 1
+
+                # Store the symbolic parameter in the binding weights
+                self.input_binding_weights[activity][binding] = param_name
+
+                # Record the mapping
+                param_mapping['input'][param_name] = (activity, binding)
+
+        # Process output bindings for all activities except end
+        for activity in self.activities:
+            # if activity == self.end_activity:
+            #     continue  # Skip end activity as it has no output bindings
+
+            for binding in self.output_bindings[activity]:
+                # if len(self.output_bindings[activity]) == 1:
+                #     self.output_binding_weights[activity][binding] = str(1)
+                #     break
+
+                # Create parameter name
+                param_name = f"o{output_param_counter}"
+                output_param_counter += 1
+
+                # Store the symbolic parameter in the binding weights
+                self.output_binding_weights[activity][binding] = param_name
+                # Record the mapping
+                param_mapping['output'][param_name] = (activity, binding)
+
+        return param_mapping
+
+    def get_binding_from_parameter(self, param_name, param_mapping):
+        """
+        Retrieve the activity and binding associated with a parameter name.
+
+        Args:
+            param_name: The parameter name (e.g., 'i0', 'o1')
+            param_mapping: The parameter mapping dictionary returned by assign_parameterized_weights
+
+        Returns:
+            Tuple of (activity, binding, binding_type) where binding_type is either 'input' or 'output'
+            Returns None if parameter not found
+        """
+        # Check if it's an input parameter
+        if param_name.startswith('i') and param_name in param_mapping['input']:
+            activity, binding = param_mapping['input'][param_name]
+            return activity, binding, 'input'
+
+        # Check if it's an output parameter
+        elif param_name.startswith('o') and param_name in param_mapping['output']:
+            activity, binding = param_mapping['output'][param_name]
+            return activity, binding, 'output'
+
+        # Parameter not found
+        return None
 
 class Semantics:
     """
@@ -356,7 +434,7 @@ class Semantics:
     binding sequences and state transitions.
     """
 
-    def __init__(self, causal_net: WeightedCausalNet):
+    def __init__(self, causal_net: SymbolicCausalNet):
         """
         Initialize the semantics for a given Causal-net.
 
@@ -484,7 +562,8 @@ class Semantics:
             for output_binding in self.causal_net.output_bindings[self.causal_net.start_activity]:
                 binding = Binding(self.causal_net.start_activity, set(), output_binding)
                 probability = self.causal_net.get_output_binding_weight(self.causal_net.start_activity, output_binding)
-                enabled_bindings[binding] = probability
+                enabled_bindings[binding] = ""
+                print("assign to start activity")
             return enabled_bindings
 
         # Count all pending obligations grouped by target activity
@@ -518,16 +597,35 @@ class Semantics:
                 for output_binding in self.causal_net.output_bindings[activity]:
                     binding = Binding(activity, input_binding, output_binding)
                     if self.is_enabled(binding, current_state):
-                        enabled_bindings[binding] = 1
+                        symbolic_probability = ""
+                        if len(enabled_input_bindings) > 1:
+                            input_weight = self.causal_net.get_input_binding_weight(binding.activity, binding.input_set)
+                            symbolic_probability = str(input_weight)
+                            symbolic_probability += "/("
+                            symbolic_probability += self.causal_net.get_total_input_binding_weight(binding.activity)
+                            symbolic_probability += ")"
 
-        print(f"\nEnabled input bindings: {enabled_input_bindings}")
+                        if len(self.causal_net.output_bindings[binding.activity]) > 1:
+                            output_weight = self.causal_net.get_output_binding_weight(binding.activity,   binding.output_set)
+                            symbolic_probability += str(output_weight)
+                            symbolic_probability += "/("
+                            symbolic_probability += self.causal_net.get_total_output_binding_weight(binding.activity)
+                            symbolic_probability += ")"
+                        enabled_bindings[binding] = symbolic_probability
+
         #compute the probability of each enabled binding
-        for binding in enabled_bindings:
-            input_weight = self.causal_net.get_input_binding_weight(binding.activity, binding.input_set)
-            output_weight = self.causal_net.get_output_binding_weight(binding.activity, binding.output_set)
-            enabled_bindings[binding] = input_weight * output_weight / (
-                        len(enabled_input_bindings) * len(self.causal_net.output_bindings[binding.activity]))
-
+        # for binding in enabled_bindings:
+            # input_weight = self.causal_net.get_input_binding_weight(binding.activity, binding.input_set)
+            # output_weight = self.causal_net.get_output_binding_weight(binding.activity, binding.output_set)
+            # symbolic_probability = str(input_weight)
+            # symbolic_probability += str("*")
+            # symbolic_probability += str(output_weight)
+            # symbolic_probability += "/(("
+            # symbolic_probability += self.causal_net.get_total_input_binding_weight(binding.activity)
+            # symbolic_probability += str(")*(")
+            # symbolic_probability += self.causal_net.get_total_output_binding_weight(binding.activity)
+            # symbolic_probability += "))"
+            # enabled_bindings[binding] = symbolic_probability
         return enabled_bindings
 
     def is_valid_binding_sequence(self, binding_sequence: List[Binding]) -> bool:
@@ -601,19 +699,22 @@ class Semantics:
 
                 # Calculate the new state
                 new_state = self.execute_binding(binding, current_state)
-                new_probability = current_probability * probability
+                new_probability = current_probability
+                if probability != "":
+                    new_probability += str("*")
+                    new_probability += probability
 
                 # If the binding leads to the end activity and the state is empty,
                 # we've found a valid sequence
                 if binding.activity == self.causal_net.end_activity and new_state.is_empty():
-                    valid_sequences[tuple(new_sequence)] = new_probability
+                    valid_sequences[tuple(new_sequence)] = new_probability[1:]
                     continue
 
                 # Continue the search
                 dfs(new_sequence, new_state, new_probability, depth + 1)
 
         # Start the search from the initial state
-        dfs([], self.initial_state(), 1,0)
+        dfs([], self.initial_state(), "",0)
 
         return valid_sequences
 
@@ -631,74 +732,171 @@ def project_binding_sequence_to_activities(binding_sequence: List[Binding]) -> L
     return [binding.activity for binding in binding_sequence if binding.activity != "ARTIFICIAL_END" and binding.activity != "ARTIFICIAL_START"]
 
 
-def print_cnet_info(cnet: WeightedCausalNet):
+def print_scn_info(scn: SymbolicCausalNet):
     """
-    Print information about a Weighted CausalNet object for debugging.
+    Print information about a Stochastic CausalNet object for debugging.
 
     Args:
-        cnet: The WeightedCausalNet object to print
+        scn: The SymbolicCausalNet object to print
     """
-    print("Weighted Causal Net Information:")
-    print(f"Start Activity: {cnet.start_activity}")
-    print(f"End Activity: {cnet.end_activity}")
-    print(f"Activities: {cnet.activities}")
+    print("Stochastic Causal Net Information:")
+    print(f"Start Activity: {scn.start_activity}")
+    print(f"End Activity: {scn.end_activity}")
+    print(f"Activities: {scn.activities}")
 
     print("\nInput Bindings with Weights:")
-    for activity in sorted(cnet.activities):
-        if activity != cnet.start_activity:
+    for activity in sorted(scn.activities):
+        if activity != scn.start_activity:
             bindings = []
-            for binding in cnet.input_bindings[activity]:
-                weight = cnet.input_binding_weights[activity][binding]
+            for binding in scn.input_bindings[activity]:
+                weight = scn.input_binding_weights[activity][binding]
                 bindings.append(f"{list(binding)} (weight: {weight})")
             print(f"  {activity}: {bindings}")
 
     print("\nOutput Bindings with Weights:")
-    for activity in sorted(cnet.activities):
-        if activity != cnet.end_activity:
+    for activity in sorted(scn.activities):
+        if activity != scn.end_activity:
             bindings = []
-            for binding in cnet.output_bindings[activity]:
-                weight = cnet.output_binding_weights[activity][binding]
+            for binding in scn.output_bindings[activity]:
+                weight = scn.output_binding_weights[activity][binding]
                 bindings.append(f"{list(binding)} (weight: {weight})")
             print(f"  {activity}: {bindings}")
 
-    print("\nTotal Output Binding Weights:")
-    for activity in sorted(cnet.activities):
-        if activity != cnet.end_activity:
-            total_weight = cnet.get_total_output_binding_weight(activity)
-            print(f"  {activity}: {total_weight}")
+
+def import_symbolic_causal_net_from_xml(xml_content: str, default_weight: float = 1.0) -> SymbolicCausalNet:
+    """
+    Import a C-net model from an XML string and convert it to a Weighted C-net.
+
+    Args:
+        xml_content: XML string containing the C-net definition
+        default_weight: Default weight to assign to all bindings (default: 1.0)
+
+    Returns:
+        A StochasticCausalNet object representing the imported model
+    """
+    # Parse the XML
+    root = ET.parse(xml_content)
+
+    # Extract node information
+    nodes = {}  # id -> name mapping
+    start_node_id = None
+    end_node_id = None
+
+    for node_elem in root.findall('.//node'):
+        node_id = node_elem.get('id')
+        name_elem = node_elem.find('name')
+
+        # If 'name' tag is not found, try 'n' tag (different format)
+        if name_elem is None:
+            name_elem = node_elem.find('n')
+
+        if name_elem is not None:
+            node_name = name_elem.text
+            nodes[node_id] = node_name
+
+    # Find start and end nodes
+    start_node_elem = root.find('.//startTaskNode')
+    if start_node_elem is not None:
+        start_node_id = start_node_elem.get('id')
+
+    end_node_elem = root.find('.//endTaskNode')
+    if end_node_elem is not None:
+        end_node_id = end_node_elem.get('id')
+
+    if start_node_id is None or end_node_id is None:
+        raise ValueError("Start or end node not found in the XML")
+
+    if start_node_id not in nodes or end_node_id not in nodes:
+        raise ValueError("Start or end node ID not found in node definitions")
+
+    # Create the StochasticCausalNet
+    start_activity = nodes[start_node_id]
+    end_activity = nodes[end_node_id]
+    scn = SymbolicCausalNet(start_activity, end_activity)
+
+    # Add all activities
+    for node_id, node_name in nodes.items():
+        if node_id != start_node_id and node_id != end_node_id:
+            scn.add_activity(node_name)
+
+    # Process input bindings
+    for input_node_elem in root.findall('.//inputNode'):
+        node_id = input_node_elem.get('id')
+        if node_id == start_node_id:
+            continue  # Skip start node
+
+        if node_id not in nodes:
+            continue  # Skip if node not found
+
+        node_name = nodes[node_id]
+
+        for input_set_elem in input_node_elem.findall('./inputSet'):
+            input_set = set()
+            for input_node in input_set_elem.findall('./node'):
+                input_id = input_node.get('id')
+                if input_id in nodes:
+                    input_name = nodes[input_id]
+                    input_set.add(input_name)
+
+            if input_set:
+                try:
+                    scn.add_input_binding(node_name, input_set)
+                except ValueError as e:
+                    print(f"Warning: {e}")
+
+    # Process output bindings
+    for output_node_elem in root.findall('.//outputNode'):
+        node_id = output_node_elem.get('id')
+        if node_id == end_node_id:
+            continue  # Skip end node
+
+        if node_id not in nodes:
+            continue  # Skip if node not found
+
+        node_name = nodes[node_id]
+
+        for output_set_elem in output_node_elem.findall('./outputSet'):
+            output_set = set()
+            for output_node in output_set_elem.findall('./node'):
+                output_id = output_node.get('id')
+                if output_id in nodes:
+                    output_name = nodes[output_id]
+                    output_set.add(output_name)
+
+            if output_set:
+                try:
+                    scn.add_output_binding(node_name, output_set)
+                except ValueError as e:
+                    print(f"Warning: {e}")
+
+    scn.assign_parameterized_weights()
+    return scn
 
 
+def import_symbolic_causal_net_from_file(filename: str, default_weight: float = 1.0) -> SymbolicCausalNet:
+    """
+    Import a C-net model from an XML file and convert it to a Weighted C-net.
+
+    Args:
+        filename: Path to the XML file
+        default_weight: Default weight to assign to all bindings (default: 1.0)
+
+    Returns:
+        A StochasticCausalNet object representing the imported model
+    """
+    with open(filename, 'r', encoding='utf-8') as file:
+        xml_content = file.read()
+
+    return import_symbolic_causal_net_from_xml(xml_content, default_weight)
 
 # Example usage
 def example_usage():
-    # Create a simple Weighted C-net
-    cnet = WeightedCausalNet("start", "end")
-
-    # Add activities
-    cnet.add_activity("A")
-    cnet.add_activity("B")
-    cnet.add_activity("C")
-
-    # Add input and output bindings with weights
-    cnet.add_output_binding("start", {"A"}, 1.0)
-
-    cnet.add_input_binding("A", {"start"}, 1.0)
-    cnet.add_output_binding("A", {"B", "C"}, 1.0)
-
-    cnet.add_input_binding("B", {"A"}, 1.0)
-    cnet.add_output_binding("B", {"end"}, 1.0)
-
-    cnet.add_input_binding("C", {"A"}, 1.0)
-    cnet.add_output_binding("C", {"end"}, 1.0)
-
-    # The end activity requires both B and C as inputs
-    cnet.add_input_binding("end", {"B", "C"}, 1.0)
-
-    # Print information about the C-net
-    print_cnet_info(cnet)
+    # Create a simple Stochastic C-net
+    symbolic_cn = import_symbolic_causal_net_from_xml("../data/road_heuristic.cnet")    # Print information about the C-net
+    print_scn_info(symbolic_cn)
 
     # Create the semantics
-    semantics = Semantics(cnet)
+    semantics = Semantics(symbolic_cn)
 
     # Generate all valid binding sequences
     valid_sequences = semantics.generate_all_valid_binding_sequences()

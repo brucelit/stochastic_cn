@@ -8,8 +8,8 @@ matrix = np.array([
     [0, 0, 0, 0, 1, -1, 0],
     [0, 0, 0, 0, 0, 1, -1],
     [0, 0, 0, 0, 0, 0, 1]
-], np.float16)
+], np.float64)
 
-x = np.array([1,1,1.3333333,0.6,0.4,1,1])
+x = np.array([1,1,1.333333333333333,0.6,0.4,1,1])
 
-print("get the result of matrix mult:",np.dot(matrix,x))
+print("get the result of matrix mult:",np.dot(matrix.transpose(),x))

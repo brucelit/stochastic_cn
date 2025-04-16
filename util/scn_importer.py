@@ -1,9 +1,10 @@
 import xml.etree.ElementTree as ET
-from obj.causal_net import CausalNet, print_cnet_info, project_binding_sequence_to_activities, \
-    Semantics
+from typing import Dict, Set, List, Tuple
+from obj.stochastic_causal_net import StochasticCausalNet,  project_binding_sequence_to_activities, \
+    Semantics, print_scn_info
 
 
-def import_cnet_from_xml(xml_content: str, default_weight: float = 1.0) -> CausalNet:
+def import_scn_from_xml(xml_content: str, default_weight: float = 1.0) -> StochasticCausalNet:
     """
     Import a C-net model from an XML string and convert it to a Weighted C-net.
 
@@ -12,7 +13,7 @@ def import_cnet_from_xml(xml_content: str, default_weight: float = 1.0) -> Causa
         default_weight: Default weight to assign to all bindings (default: 1.0)
 
     Returns:
-        A CausalNet object representing the imported model
+        A StochasticCausalNet object representing the imported model
     """
     # Parse the XML
     root = ET.parse(xml_content)
@@ -49,15 +50,15 @@ def import_cnet_from_xml(xml_content: str, default_weight: float = 1.0) -> Causa
     if start_node_id not in nodes or end_node_id not in nodes:
         raise ValueError("Start or end node ID not found in node definitions")
 
-    # Create the CausalNet
+    # Create the StochasticCausalNet
     start_activity = nodes[start_node_id]
     end_activity = nodes[end_node_id]
-    cnet = CausalNet(start_activity, end_activity)
+    scn = StochasticCausalNet(start_activity, end_activity)
 
     # Add all activities
     for node_id, node_name in nodes.items():
         if node_id != start_node_id and node_id != end_node_id:
-            cnet.add_activity(node_name)
+            scn.add_activity(node_name)
 
     # Process input bindings
     for input_node_elem in root.findall('.//inputNode'):
@@ -80,7 +81,7 @@ def import_cnet_from_xml(xml_content: str, default_weight: float = 1.0) -> Causa
 
             if input_set:
                 try:
-                    cnet.add_input_binding(node_name, input_set)
+                    scn.add_input_binding(node_name, input_set, default_weight)
                 except ValueError as e:
                     print(f"Warning: {e}")
 
@@ -105,13 +106,14 @@ def import_cnet_from_xml(xml_content: str, default_weight: float = 1.0) -> Causa
 
             if output_set:
                 try:
-                    cnet.add_output_binding(node_name, output_set)
+                    scn.add_output_binding(node_name, output_set, default_weight)
                 except ValueError as e:
                     print(f"Warning: {e}")
-    return cnet
+
+    return scn
 
 
-def import_cnet_from_file(filename: str, default_weight: float = 1.0) -> CausalNet:
+def import_scn_from_file(filename: str, default_weight: float = 1.0) -> StochasticCausalNet:
     """
     Import a C-net model from an XML file and convert it to a Weighted C-net.
 
@@ -120,42 +122,44 @@ def import_cnet_from_file(filename: str, default_weight: float = 1.0) -> CausalN
         default_weight: Default weight to assign to all bindings (default: 1.0)
 
     Returns:
-        A CausalNet object representing the imported model
+        A StochasticCausalNet object representing the imported model
     """
     with open(filename, 'r', encoding='utf-8') as file:
         xml_content = file.read()
 
-    return import_cnet_from_xml(xml_content, default_weight)
+    return import_scn_from_xml(xml_content, default_weight)
 
 
-def analyze_imported_cnet(cnet: CausalNet):
+def analyze_imported_scn(scn: StochasticCausalNet):
     """
     Analyze an imported Weighted Causal Net and print information about it.
 
     Args:
-        cnet: The imported CausalNet
+        scn: The imported StochasticCausalNet
     """
     # Print information about the C-net
-    print_cnet_info(cnet)
+    print_scn_info(scn)
 
     # Create the semantics
-    semantics = Semantics(cnet)
+    semantics = Semantics(scn)
 
     # Generate all valid binding sequences
     valid_sequences = semantics.generate_all_valid_binding_sequences()
 
+    probability_sum = 0.0
     # Print all unique activity sequences
     print(f"\nFound {len(valid_sequences)} valid binding sequences:")
-    for sequence in valid_sequences:
+    for sequence,probability in valid_sequences.items():
         # Project to activity sequence
         activity_sequence = project_binding_sequence_to_activities(sequence)
-        print("Resulting trace: ",activity_sequence)
+        print("Resulting trace and probability: ",probability,activity_sequence)
+        probability_sum += probability
+    print("Sum of probabilities: ",probability_sum)
 
 
 if __name__ == "__main__":
     # Import the Weighted Causal Net
-    cnet = import_cnet_from_xml("../data/abcd.cnet")
-    # export_to_cnet(cnet, "../data/exported_abbc.cnet")
+    scn = import_scn_from_xml("../data/abcd.cnet")
 
     # Analyze the imported Causal Net
-    analyze_imported_cnet(cnet)
+    analyze_imported_scn(scn)
