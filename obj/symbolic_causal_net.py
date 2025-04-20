@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 
 from typing import Set, List
 from collections import defaultdict, Counter
-
+from sympy import symbols
 
 class Obligation:
     """
@@ -46,6 +46,8 @@ class State:
             obligations: A dictionary mapping obligations to their counts
         """
         self.obligations = Counter()
+        self.is_start = False
+        self.is_final = False
         if obligations:
             self.obligations.update(obligations)
 
@@ -69,6 +71,12 @@ class State:
     def is_empty(self) -> bool:
         """Check if the state has no obligations."""
         return len(self.obligations) == 0
+
+    def set_as_start(self) -> bool:
+        self.is_start = True
+
+    def set_as_final(self) -> bool:
+        self.is_final = True
 
     def get_all_obligations(self) -> List[Obligation]:
         """Get all obligations in the state (including duplicates)."""
@@ -332,11 +340,6 @@ class SymbolicCausalNet:
         Returns:
             The sum of weights of all input bindings
         """
-        # No input bindings for start activity
-
-        # Calculate the sum of weights for all input bindings
-        # total_weight = sum(self.input_binding_weights[activity][binding]
-        #                    for binding in self.input_bindings[activity])
         total_weight = ""
         for binding in self.input_bindings[activity]:
             total_weight += self.input_binding_weights[activity][binding]
@@ -357,14 +360,14 @@ class SymbolicCausalNet:
             Dictionary mapping parameter names to their corresponding bindings
         """
         # Initialize parameter counters
-        input_param_counter = 0
-        output_param_counter = 0
+        param_counter = 0
 
         # Dictionary to track parameter assignments
-        param_mapping = {
-            'input': {},  # Format: {param_name: (activity, binding)}
-            'output': {}  # Format: {param_name: (activity, binding)}
-        }
+        # param_mapping = {
+        #     'input': {},  # Format: {param_name: (activity, binding)}
+        #     'output': {}  # Format: {param_name: (activity, binding)}
+        # }
+        param_mapping = {}
 
         # Process input bindings for all activities except start
         for activity in self.activities:
@@ -373,14 +376,15 @@ class SymbolicCausalNet:
 
             for binding in self.input_bindings[activity]:
                 # Create parameter name
-                param_name = f"i{input_param_counter}"
-                input_param_counter += 1
+                param_name = f"w{param_counter}"
+                param_counter += 1
 
                 # Store the symbolic parameter in the binding weights
                 self.input_binding_weights[activity][binding] = param_name
 
                 # Record the mapping
-                param_mapping['input'][param_name] = (activity, binding)
+                # param_mapping['input'][param_name] = (activity, binding)
+                param_mapping[param_name] = (activity, binding)
 
         # Process output bindings for all activities except end
         for activity in self.activities:
@@ -388,18 +392,15 @@ class SymbolicCausalNet:
             #     continue  # Skip end activity as it has no output bindings
 
             for binding in self.output_bindings[activity]:
-                # if len(self.output_bindings[activity]) == 1:
-                #     self.output_binding_weights[activity][binding] = str(1)
-                #     break
-
                 # Create parameter name
-                param_name = f"o{output_param_counter}"
-                output_param_counter += 1
+                param_name = f"w{param_counter}"
+                param_counter += 1
 
                 # Store the symbolic parameter in the binding weights
                 self.output_binding_weights[activity][binding] = param_name
                 # Record the mapping
-                param_mapping['output'][param_name] = (activity, binding)
+                # param_mapping['output'][param_name] = (activity, binding)
+                param_mapping[param_name] = (activity, binding)
 
         return param_mapping
 
@@ -445,7 +446,15 @@ class Semantics:
 
     def initial_state(self) -> State:
         """Get the initial state (empty state)."""
-        return State()
+        state = State()
+        state.set_as_start()
+        return state
+
+    def final_state(self) -> State:
+        """Get the initial state (empty state)."""
+        state = State()
+        state.set_as_final()
+        return state
 
     def execute_binding(self, binding: Binding, current_state: State) -> State:
         """
@@ -498,6 +507,9 @@ class Semantics:
                 obligation = Obligation(binding.activity, output_activity)
                 new_state.add_obligation(obligation)
 
+        # Special case for the end activity
+        if new_state.is_empty():
+            new_state.is_final = True
         return new_state
 
     def is_enabled(self, binding: Binding, current_state: State) -> bool:
@@ -561,9 +573,8 @@ class Semantics:
         if current_state.is_empty():
             for output_binding in self.causal_net.output_bindings[self.causal_net.start_activity]:
                 binding = Binding(self.causal_net.start_activity, set(), output_binding)
-                probability = self.causal_net.get_output_binding_weight(self.causal_net.start_activity, output_binding)
+                # probability = self.causal_net.get_output_binding_weight(self.causal_net.start_activity, output_binding)
                 enabled_bindings[binding] = ""
-                print("assign to start activity")
             return enabled_bindings
 
         # Count all pending obligations grouped by target activity
@@ -582,16 +593,6 @@ class Semantics:
                 if not set(input_binding).issubset(source_activities):
                     continue
 
-                # # Check if we have exactly the right number of obligations
-                # match = True
-                # for source in input_binding:
-                #     if sources[source] != 1:  # We need exactly one obligation per source
-                #         match = False
-                #         break
-                #
-                # if not match:
-                #     continue
-
                 enabled_input_bindings.append(input_binding)
                 # For matching input binding, consider all possible output bindings
                 for output_binding in self.causal_net.output_bindings[activity]:
@@ -603,7 +604,9 @@ class Semantics:
                             symbolic_probability = str(input_weight)
                             symbolic_probability += "/("
                             symbolic_probability += self.causal_net.get_total_input_binding_weight(binding.activity)
-                            symbolic_probability += ")"
+                            symbolic_probability += ")*"
+                        else:
+                            symbolic_probability = "1*"
 
                         if len(self.causal_net.output_bindings[binding.activity]) > 1:
                             output_weight = self.causal_net.get_output_binding_weight(binding.activity,   binding.output_set)
@@ -611,21 +614,10 @@ class Semantics:
                             symbolic_probability += "/("
                             symbolic_probability += self.causal_net.get_total_output_binding_weight(binding.activity)
                             symbolic_probability += ")"
+                        else:
+                            symbolic_probability = symbolic_probability[:-1]
                         enabled_bindings[binding] = symbolic_probability
 
-        #compute the probability of each enabled binding
-        # for binding in enabled_bindings:
-            # input_weight = self.causal_net.get_input_binding_weight(binding.activity, binding.input_set)
-            # output_weight = self.causal_net.get_output_binding_weight(binding.activity, binding.output_set)
-            # symbolic_probability = str(input_weight)
-            # symbolic_probability += str("*")
-            # symbolic_probability += str(output_weight)
-            # symbolic_probability += "/(("
-            # symbolic_probability += self.causal_net.get_total_input_binding_weight(binding.activity)
-            # symbolic_probability += str(")*(")
-            # symbolic_probability += self.causal_net.get_total_output_binding_weight(binding.activity)
-            # symbolic_probability += "))"
-            # enabled_bindings[binding] = symbolic_probability
         return enabled_bindings
 
     def is_valid_binding_sequence(self, binding_sequence: List[Binding]) -> bool:
@@ -700,7 +692,7 @@ class Semantics:
                 # Calculate the new state
                 new_state = self.execute_binding(binding, current_state)
                 new_probability = current_probability
-                if probability != "":
+                if probability != "1":
                     new_probability += str("*")
                     new_probability += probability
 
@@ -717,6 +709,7 @@ class Semantics:
         dfs([], self.initial_state(), "",0)
 
         return valid_sequences
+
 
 
 def project_binding_sequence_to_activities(binding_sequence: List[Binding]) -> List[str]:

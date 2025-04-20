@@ -154,7 +154,6 @@ def analyze_imported_scn(scn: StochasticCausalNet):
         activity_sequence = project_binding_sequence_to_activities(sequence)
         print("Resulting trace and probability: ",probability,activity_sequence)
         probability_sum += probability
-    print("Sum of probabilities: ",probability_sum)
 
 
 if __name__ == "__main__":
