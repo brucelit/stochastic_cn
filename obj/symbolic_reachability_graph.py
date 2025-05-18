@@ -11,6 +11,7 @@ from obj.symbolic_causal_net import SymbolicCausalNet, State, Semantics, Obligat
 from collections import deque, defaultdict
 from typing import Tuple
 
+
 class SymbolicReachabilityGraph:
     """
     Class for generating and analyzing the reachability graph of a Causal-net.
@@ -134,6 +135,7 @@ class SymbolicReachabilityGraph:
                     probability = str(1)
                 edge_label = f"{binding.activity}\np={probability}"
 
+
                 # Execute the binding to get the next state
                 try:
                     next_state = self.semantics.execute_binding(binding, current_state)
@@ -151,12 +153,8 @@ class SymbolicReachabilityGraph:
                         self.state_mapping[current_state_str],
                         self.state_mapping[next_state_str],
                         binding.activity,
-                        probability
+                        remove_one_multiply(probability)[:-1]
                     ))
-
-                    # if current_state_str == "final empty state":
-                    #     print("current state is final")
-                    #     continue
 
                     # Add edge between states
                     self.graph.add_edge(current_state_str, next_state_str,
@@ -171,7 +169,7 @@ class SymbolicReachabilityGraph:
 
         return self.graph
 
-    def get_sub_trace_probability(self, source_state, trace, trace_length):
+    def get_sub_trace_freq(self, source_state, trace, trace_length):
         """
         Generate the probability of a sub-trace from a given state
 
@@ -184,11 +182,13 @@ class SymbolicReachabilityGraph:
         """
         probability4sub_trace = []
         def dfs(current_state, current_probability, sub_trace, depth):
+
             # Base case: maximum depth reached
             if depth >= trace_length:
                 probability4sub_trace.append(current_probability)
                 return
-
+            if current_state.is_final:
+                return
             # Get the dictionary of all enabled bindings
             enabled_bindings = self.semantics.get_enabled_bindings(current_state)
             for binding, probability in enabled_bindings.items():
@@ -198,43 +198,84 @@ class SymbolicReachabilityGraph:
                     new_state = self.semantics.execute_binding(binding, current_state)
                     new_probability = current_probability
                     if probability != "":
-                        if current_probability == "1":
-                            new_probability = probability
-                        else:
-                            new_probability += str("*")
+                        if probability != "1*":
                             new_probability += probability
-
-                    # If the binding leads to the end activity and the state is empty, we reached the end
-                    # if binding.activity == self.stochastic_causal_net.end_activity and new_state.is_empty():
-                    #     continue
-
-                    # Continue the search
                     dfs(new_state, new_probability, sub_trace[1:], depth + 1)
 
         # Start the search from the initial state
-        dfs(source_state, "1", trace, 0)
+        dfs(source_state, "1*", trace, 0)
 
         # If no valid binding sequences were found, return "0"
         if len(probability4sub_trace) == 0:
             return "0"
 
         elif len(probability4sub_trace) == 1:
-            return probability4sub_trace[0]
+            return probability4sub_trace[0][:-1]
 
         # If some valid binding sequences were found, return the sum
         else:
             state_prop = ""
             for sub_trace_prob in probability4sub_trace:
-                print("sub trace probability: ", sub_trace_prob)
-                state_prop += str(sub_trace_prob)
+                state_prop += str(sub_trace_prob)[:-1]
                 state_prop += str("+")
             return state_prop[:-1]
 
-    def generate_markovian_probability(self,
+
+    def get_all_sub_trace_freq(self, source_state, trace_length):
+        """
+        Generate the probability of a sub-trace from a given state
+
+        Args:
+            source_state: The state to start from
+            trace: The trace to consider
+            trace_length: consider sub-trace of length k
+        Returns:
+            A list of all valid binding sequences
+        """
+        probability4sub_trace = []
+        def dfs(current_state, current_probability, depth):
+
+            # Base case: maximum depth reached
+            if depth >= trace_length:
+                probability4sub_trace.append(current_probability)
+                return
+            if current_state.is_final and depth < trace_length:
+                return "0"
+            # Get the dictionary of all enabled bindings
+            enabled_bindings = self.semantics.get_enabled_bindings(current_state)
+            for binding, probability in enabled_bindings.items():
+                # Create a new sequence by adding this binding
+                    # Calculate the new state
+                new_state = self.semantics.execute_binding(binding, current_state)
+                new_probability = current_probability
+                if probability != "":
+                    if probability != "1*":
+                        new_probability += probability
+                dfs(new_state, new_probability, depth + 1)
+
+        # Start the search from the initial state
+        dfs(source_state, "1*", 0)
+
+        # If no valid binding sequences were found, return "0"
+        if len(probability4sub_trace) == 0:
+            return "0"
+
+        elif len(probability4sub_trace) == 1:
+            return probability4sub_trace[0][:-1]
+
+        # If some valid binding sequences were found, return the sum
+        else:
+            state_prop = ""
+            for sub_trace_prob in probability4sub_trace:
+                state_prop += str(sub_trace_prob)[:-1]
+                state_prop += str("+")
+            return state_prop[:-1]
+
+    def generate_markovian_frequency(self,
                                        markovian_slang,
                                        state2symbolic_probability,
                                        k,
-                                       max_depth: int = 50):
+                                       max_depth: int = 20):
         """
         Generate the reachability graph for the causal net.
 
@@ -244,6 +285,8 @@ class SymbolicReachabilityGraph:
         Returns:
             NetworkX DiGraph representing the reachability graph
         """
+        total_freq = ""
+
         sub_trace_probabilities = dict.fromkeys(markovian_slang, "")
 
         # Start with initial state
@@ -261,18 +304,22 @@ class SymbolicReachabilityGraph:
 
         while queue:
             current_state, current_state_str, depth = queue.popleft()
+            
+            # get the total freq of all sub-traces of length k from current-state
+            temp_total_freq = "(" + self.get_all_sub_trace_freq(current_state, k)+")*(" +str(state2symbolic_probability[current_state_str]) + ")+"
 
-            for trace, probability in markovian_slang.items():
-                sub_trace_prob = self.get_sub_trace_probability(current_state, trace, k)
+            total_freq += temp_total_freq
+            for trace, _ in markovian_slang.items():
+                sub_trace_prob = self.get_sub_trace_freq(current_state, trace, k)
                 if sub_trace_prob == "0":
                     continue
                 if str(state2symbolic_probability[current_state_str]) == "1":
-                    sub_trace_probabilities[trace] += sub_trace_prob  + str("+")
+                    sub_trace_probabilities[trace] += str("(")+sub_trace_prob  + str(")+")
                 else:
                     if sub_trace_prob == "1":
-                        sub_trace_probabilities[trace] += str(state2symbolic_probability[current_state_str]) + str("+")
+                        sub_trace_probabilities[trace] += str("(")+str(state2symbolic_probability[current_state_str]) + str(")+")
                     else:
-                        sub_trace_probabilities[trace] += str(state2symbolic_probability[current_state_str]) + "*" + sub_trace_prob + str("+")
+                        sub_trace_probabilities[trace] += str("(")+str(state2symbolic_probability[current_state_str]) + ")*" + sub_trace_prob + str("+")
 
             # Stop if we've reached the maximum depth
             if depth >= max_depth:
@@ -304,7 +351,7 @@ class SymbolicReachabilityGraph:
                         self.state_mapping[current_state_str],
                         self.state_mapping[next_state_str],
                         binding.activity,
-                        probability
+                        remove_one_multiply(probability)
                     ))
 
                     # Add edge between states
@@ -321,9 +368,64 @@ class SymbolicReachabilityGraph:
         for key,v in sub_trace_probabilities.items():
             if v == "":
                 sub_trace_probabilities[key] = "0"
+            else:
+                sub_trace_probabilities[key] = v[:-1]
+        return sub_trace_probabilities, total_freq[:-1]
 
-        return sub_trace_probabilities
 
+    def get_parameter_incidence_matrix(self):
+        """
+        Generate an incidence matrix with parameter names instead of concrete probabilities.
+        This is useful when working with symbolic parameters.
+
+        Returns:
+            pandas.DataFrame: The incidence matrix with parameter names
+        """
+        # Get the number of states
+        num_states = len(self.state_mapping)
+        print("Number of states:", num_states)
+        # Create a matrix of empty strings
+        matrix = np.empty((num_states, num_states), dtype=object)
+        matrix.fill("0")
+        param_mapping = {}
+        reverse_param_mapping = {}
+        # Fill the matrix with parameter information
+        for source_idx, target_idx, activity, probability in self.transitions:
+            if matrix[source_idx, target_idx] != '':
+                matrix[source_idx, target_idx] = probability
+
+        for i in range(num_states):
+            if matrix[i][i] == '0':
+                matrix[i][i] = "-1"
+            else:
+                matrix[i][i] = matrix[i][i] + "-1"
+
+        counter = 0
+        for source_idx, target_idx, activity, probability in self.transitions:
+            if matrix[source_idx, target_idx] == "0" or matrix[source_idx, target_idx] == "-1" or matrix[source_idx, target_idx] == "1":
+                continue
+            if probability in reverse_param_mapping.keys():
+                matrix[source_idx, target_idx] = reverse_param_mapping[probability]
+                continue
+            param_name = f"a{counter}"
+            counter += 1
+            matrix[source_idx, target_idx] = param_name
+            param_mapping[param_name] = "("+probability+")"
+            reverse_param_mapping[probability] = param_name
+
+        sympy_matrix, symbols = matrix_to_sympy(matrix.T)
+        # Create reverse mapping from index to state string
+        reverse_mapping = {idx: state for state, idx in self.state_mapping.items()}
+        # Create a numpy vector of length num_states
+        vector = [0 for i in range(num_states)]
+        vector[0] = -1
+        b = Matrix(vector)
+        result_matrix = sympy_matrix.solve(b)
+        state2symbolic_probability = {}
+        for i in range(len(result_matrix)):
+            state2symbolic_probability[reverse_mapping[i]] = replace_parameters(expand_powers(str(result_matrix[i])),param_mapping)
+
+        return sympy_matrix, symbols, state2symbolic_probability
 
     def visualize(self, output_file: str = None, figsize: Tuple[int, int] = (12, 8)):
         """
@@ -380,55 +482,7 @@ class SymbolicReachabilityGraph:
         plt.show()
 
 
-    def get_parameter_incidence_matrix(self):
-        """
-        Generate an incidence matrix with parameter names instead of concrete probabilities.
-        This is useful when working with symbolic parameters.
 
-        Returns:
-            pandas.DataFrame: The incidence matrix with parameter names
-        """
-        # Get the number of states
-        num_states = len(self.state_mapping)
-
-        # Create a matrix of empty strings
-        matrix = np.empty((num_states, num_states), dtype=object)
-        matrix.fill("0")
-
-        # Fill the matrix with parameter information
-        for source_idx, target_idx, activity, probability in self.transitions:
-            if matrix[source_idx, target_idx] != '':
-                matrix[source_idx, target_idx] = probability
-            # else:
-            #     matrix[source_idx, target_idx] = probability
-        for i in range(num_states):
-            if matrix[i][i] == '0':
-                matrix[i][i] = "-1"
-            else:
-                matrix[i][i] = matrix[i][i] + "-1"
-
-        sympy_matrix, symbols = matrix_to_sympy(matrix.T)
-        # Create reverse mapping from index to state string
-        reverse_mapping = {idx: state for state, idx in self.state_mapping.items()}
-
-        # Create a DataFrame with state labels
-        df = pd.DataFrame(
-            matrix,
-            index=[reverse_mapping[i] for i in range(num_states)],
-            columns=[reverse_mapping[i] for i in range(num_states)]
-        )
-        # df.to_csv("../data/rtf_ic.csv")
-
-        # Create a numpy vector of length num_states
-        vector = [0 for i in range(num_states)]
-        vector[0] = -1
-        b = Matrix(vector)
-        result = sympy_matrix.solve(b)
-
-        state2symbolic_probability = {}
-        for i in range(len(result)):
-            state2symbolic_probability[reverse_mapping[i]] = result[i]
-        return df, sympy_matrix, symbols,state2symbolic_probability
 
 def matrix_to_sympy(matrix):
     """
@@ -469,17 +523,18 @@ def matrix_to_sympy(matrix):
             elif cell == '1':
                 result[i, j] = 1
                 continue
+            elif cell == '-1':
+                result[i, j] = -1
+                continue
+            namespace = {matrix[i][j]: get_symbol(matrix[i][j])}
 
             # Find and create all variables in the expression
-            var_pattern = r'([oi]\d+)'
-            variables = re.findall(var_pattern, cell)
-
-            for var in variables:
-                get_symbol(var)
-
+            # var_pattern = r'([oi]\d+)'
+            # variables = re.findall(var_pattern, cell)
+            # for var in variables:
+            # get_symbol(matrix[i][j])
             # Create a namespace with all symbols for evaluation
-            namespace = {var: get_symbol(var) for var in variables}
-
+            # namespace = {var: get_symbol(var) for var in variables}
             try:
                 # Use sympy.sympify to convert the string expression to a SymPy expression
                 result[i, j] = sp.sympify(cell, locals=namespace)
@@ -492,7 +547,7 @@ def matrix_to_sympy(matrix):
 # Example usage
 def example_reachability_graph():
     # Create a simple Weighted C-net
-    symbolic_cn = import_symbolic_causal_net_from_xml("../data/abbc.cnet")
+    symbolic_cn = import_symbolic_causal_net_from_xml("../data/abcd_concurrency.cnet")
     symbolic_cn.assign_parameterized_weights()
 
     # Create the reachability graph
@@ -500,7 +555,7 @@ def example_reachability_graph():
     symbolic_rg.generate_reachability_graph()
 
     # Generate parameter incidence matrix
-    param_matrix, sympy_matrix, symbols,state2symbolic_probability  = symbolic_rg.get_parameter_incidence_matrix()
+    # param_matrix, sympy_matrix, symbols,state2symbolic_probability  = symbolic_rg.get_parameter_incidence_matrix()
     # print("Parameter Incidence Matrix:", param_matrix)
     # print("SymPy Matrix:", sympy_matrix)
     # print("Symbols:", symbols)
@@ -509,10 +564,49 @@ def example_reachability_graph():
     # print("\nState Mapping:")
     # for state_str, idx in symbolic_rg.state_mapping.items():
     #     print(f"State {idx}: {state_str}")
-
+    symbolic_rg.visualize()
     return symbolic_rg
 
 
+def expand_powers(expression):
+    # Pattern to match a variable/number followed by ** and a number
+    pattern = r'([a-zA-Z0-9]+)\*\*(\d+)'
+
+    def replacement(match):
+        base = match.group(1)
+        exponent = int(match.group(2))
+
+        # Handle special cases
+        if exponent == 0:
+            return '1'
+        elif exponent == 1:
+            return base
+        else:
+            # Repeat the base 'exponent' times, joined by *
+            return '*'.join([base] * exponent)
+
+    # Keep applying the replacement until no more powers remain
+    while '**' in expression:
+        expression = re.sub(pattern, replacement, expression)
+
+    return expression
+
+def replace_parameters(expression, param_mapping):
+    # Regular expression to match a0, a1, a2, etc. as whole words
+    # \b ensures word boundaries to avoid matching within other words
+    pattern = r'\b(a\d+)\b'
+
+    def replacement(match):
+        key = match.group(1)
+        # Return the corresponding value if it exists, otherwise keep original
+        return str(param_mapping.get(key, key))
+
+    return re.sub(pattern, replacement, expression)
+
+def remove_one_multiply(expression):
+    # if expression.startswith("1*"):
+    #     return expression[2:]
+    return expression
+
 if __name__ == "__main__":
     symbolic_rg = example_reachability_graph()
-    symbolic_rg.visualize()

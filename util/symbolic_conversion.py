@@ -2,32 +2,34 @@ import numba
 import numpy as np
 import re
 
-
 plus_idx = -1
 minus_idx = -2
 prod_idx = -3
 div_idx = -4
 
 
-def replace_patterns(input_string):
-    # Create a list of patterns and their replacements
-    replacements = [
-        (r"\+1\*", "+"),
-        (r"\*1\+", "+"),
-        (r"\*1\*", "*"),
-        (r"\(1\*", "("),
-        (r"\*1\)", ")")
-    ]
+def clean_expression(expr):
+    """
+      Remove unnecessary '1*' multiplications from an expression,
+      while preserving variable references like w1*, w11*, etc.
 
-    # Apply each replacement in order
-    result = input_string
-    for pattern, replacement in replacements:
-        # Create a regular expression for the pattern
-        regex = re.compile(pattern)
-        # Replace all occurrences of the pattern
-        result = re.sub(regex, replacement, result)
+      Args:
+          expr: A string containing the mathematical expression
 
-    return result
+      Returns:
+          The cleaned expression with unnecessary '1*' removed
+      """
+    # Step 1: Temporarily mark all variable references to protect them
+    # This handles variables like w1, w11, etc.
+    step1 = re.sub(r'([a-zA-Z]\w*\d)\*', r'\1__MARKER__', expr)
+
+    # Step 2: Remove all standalone 1* occurrences
+    step2 = re.sub(r'1\*', '', step1)
+
+    # Step 3: Restore the original markers
+    final = re.sub(r'__MARKER__', '*', step2)
+
+    return final
 
 @numba.njit("float64(int16[::1], float64[::1], float64[::1])", inline='always', cache=True)
 def calculate_inverse_poland_expression_numba(inverse_poland_expression, constants_dict, var_lst):

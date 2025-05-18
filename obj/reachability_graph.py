@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 from collections import deque
 from typing import Dict, Tuple, Set, List, Any
-from causal_net import CausalNet, State, Binding, Semantics, Obligation
+from causal_net import CausalNet, State, Binding, Semantics, Obligation, project_binding_sequence_to_activities
 from util.cn_importer import import_cnet_from_xml
 
 
@@ -156,15 +156,15 @@ class ReachabilityGraph:
         """
         plt.figure(figsize=figsize)
 
-        # Use hierarchical layout for better visualization
-        pos = nx.spectral_layout(self.graph)
-
         # Create node labels
         node_labels = {node: data.get('label', node) for node, data in self.graph.nodes(data=True)}
 
         # Draw nodes - highlight initial and final states
         initial_node = self._state_to_str(self.semantics.initial_state())
         final_nodes = [node for node, out_degree in self.graph.out_degree() if out_degree == 0]
+
+        # Use hierarchical layout for better visualization
+        pos = nx.forceatlas2_layout(self.graph)
 
         # Draw regular nodes
         regular_nodes = [node for node in self.graph.nodes()
@@ -268,7 +268,7 @@ def example_reachability_graph():
     Create and visualize a reachability graph for an example causal net.
     """
     # Create a simple Weighted C-net
-    cnet = import_cnet_from_xml("../data/abbc.cnet")
+    cnet = import_cnet_from_xml("../data/abcd_concurrency.cnet")
 
     # Create the reachability graph
     reachability = ReachabilityGraph(cnet)
@@ -284,7 +284,15 @@ def example_reachability_graph():
 
     # Visualize the reachability graph
     reachability.visualize(output_file="causal_net_reachability.png")
+    semantics = Semantics(cnet)
 
+    valid_sequences = semantics.generate_all_valid_binding_sequences()
+
+    print(f"\nFound {len(valid_sequences)} valid binding sequences:")
+    for sequence in valid_sequences:
+        # Project to activity sequence
+        activity_sequence = project_binding_sequence_to_activities(sequence)
+        print("Resulting trace: ",activity_sequence)
     # Export to DOT format
     # reachability.export_to_dot(output_file="causal_net_reachability.dot")
     # print("To visualize with Graphviz, run: dot -Tpng causal_net_reachability.dot -o reachability_graphviz.png")

@@ -630,7 +630,7 @@ def project_binding_sequence_to_activities(binding_sequence: List[Binding]) -> L
         A list of activity names representing the sequence
     """
     return [binding.activity for binding in binding_sequence if binding.activity != "ARTIFICIAL_END" and binding.activity != "ARTIFICIAL_START"]
-
+    return [binding.activity for binding in binding_sequence]
 
 def print_scn_info(scn: StochasticCausalNet):
     """

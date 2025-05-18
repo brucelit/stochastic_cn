@@ -525,27 +525,27 @@ def print_cnet_info(cnet: CausalNet):
 # Example usage
 def example_usage():
     # Create a simple Stochastic C-net
-    cnet = CausalNet("start", "end")
-
-    # Add activities
-    cnet.add_activity("A")
-    cnet.add_activity("B")
-    cnet.add_activity("C")
-
-    # Add input and output bindings
-    cnet.add_output_binding("start", {"A"})
-
-    cnet.add_input_binding("A", {"start"})
-    cnet.add_output_binding("A", {"B", "C"})
-
-    cnet.add_input_binding("B", {"A"})
-    cnet.add_output_binding("B", {"end"})
-
-    cnet.add_input_binding("C", {"A"})
-    cnet.add_output_binding("C", {"end"})
-
-    # The end activity requires both B and C as inputs
-    cnet.add_input_binding("end", {"B", "C"})
+    # cnet = CausalNet("start", "end")
+    #
+    # # Add activities
+    # cnet.add_activity("A")
+    # cnet.add_activity("B")
+    # cnet.add_activity("C")
+    #
+    # # Add input and output bindings
+    # cnet.add_output_binding("start", {"A"})
+    #
+    # cnet.add_input_binding("A", {"start"})
+    # cnet.add_output_binding("A", {"B", "C"})
+    #
+    # cnet.add_input_binding("B", {"A"})
+    # cnet.add_output_binding("B", {"end"})
+    #
+    # cnet.add_input_binding("C", {"A"})
+    # cnet.add_output_binding("C", {"end"})
+    #
+    # # The end activity requires both B and C as inputs
+    # cnet.add_input_binding("end", {"B", "C"})
 
     # Print information about the C-net
     print_cnet_info(cnet)

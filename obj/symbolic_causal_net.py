@@ -138,6 +138,32 @@ class BindingSequence:
         return " → ".join(str(binding) for binding in self.bindings)
 
 
+def get_binding_from_parameter(param_name, param_mapping):
+    """
+    Retrieve the activity and binding associated with a parameter name.
+
+    Args:
+        param_name: The parameter name (e.g., 'i0', 'o1')
+        param_mapping: The parameter mapping dictionary returned by assign_parameterized_weights
+
+    Returns:
+        Tuple of (activity, binding, binding_type) where binding_type is either 'input' or 'output'
+        Returns None if parameter not found
+    """
+    # Check if it's an input parameter
+    if param_name.startswith('i') and param_name in param_mapping['input']:
+        activity, binding = param_mapping['input'][param_name]
+        return activity, binding, 'input'
+
+    # Check if it's an output parameter
+    elif param_name.startswith('o') and param_name in param_mapping['output']:
+        activity, binding = param_mapping['output'][param_name]
+        return activity, binding, 'output'
+
+    # Parameter not found
+    return None
+
+
 class SymbolicCausalNet:
     """
     A Stochastic Causal-net (WC-net) implementation representing process models.
@@ -404,30 +430,8 @@ class SymbolicCausalNet:
 
         return param_mapping
 
-    def get_binding_from_parameter(self, param_name, param_mapping):
-        """
-        Retrieve the activity and binding associated with a parameter name.
 
-        Args:
-            param_name: The parameter name (e.g., 'i0', 'o1')
-            param_mapping: The parameter mapping dictionary returned by assign_parameterized_weights
 
-        Returns:
-            Tuple of (activity, binding, binding_type) where binding_type is either 'input' or 'output'
-            Returns None if parameter not found
-        """
-        # Check if it's an input parameter
-        if param_name.startswith('i') and param_name in param_mapping['input']:
-            activity, binding = param_mapping['input'][param_name]
-            return activity, binding, 'input'
-
-        # Check if it's an output parameter
-        elif param_name.startswith('o') and param_name in param_mapping['output']:
-            activity, binding = param_mapping['output'][param_name]
-            return activity, binding, 'output'
-
-        # Parameter not found
-        return None
 
 class Semantics:
     """
@@ -557,6 +561,7 @@ class Semantics:
 
         return True
 
+
     def get_enabled_bindings(self, current_state: State):
         """
         Get all enabled bindings in a given state.
@@ -569,13 +574,29 @@ class Semantics:
         """
         enabled_bindings = dict()
 
+        # ------------------------------------------------------
         # Special case for the start activity when state is empty
         if current_state.is_empty():
-            for output_binding in self.causal_net.output_bindings[self.causal_net.start_activity]:
-                binding = Binding(self.causal_net.start_activity, set(), output_binding)
-                # probability = self.causal_net.get_output_binding_weight(self.causal_net.start_activity, output_binding)
-                enabled_bindings[binding] = ""
-            return enabled_bindings
+            if len(self.causal_net.output_bindings[self.causal_net.start_activity]) == 1:
+                for output_binding in self.causal_net.output_bindings[self.causal_net.start_activity]:
+                    binding = Binding(self.causal_net.start_activity, set(), output_binding)
+                    enabled_bindings[binding] = "1*"
+                    return enabled_bindings
+            else:
+                total_probability = "("
+                for output_binding in self.causal_net.output_bindings[self.causal_net.start_activity]:
+                    # binding = Binding(self.causal_net.start_activity, set(), output_binding)
+                    total_probability += self.causal_net.get_output_binding_weight(self.causal_net.start_activity, output_binding)
+                    total_probability += "+"
+                total_probability = total_probability[:-1]
+                total_probability += ")"
+
+                for output_binding in self.causal_net.output_bindings[self.causal_net.start_activity]:
+                    binding = Binding(self.causal_net.start_activity, set(), output_binding)
+                    probability = self.causal_net.get_output_binding_weight(self.causal_net.start_activity, output_binding)
+                    enabled_bindings[binding] = probability +"/" + total_probability+"*"
+                return enabled_bindings
+        # ------------------------------------------------------
 
         # Count all pending obligations grouped by target activity
         pending_obligations = defaultdict(lambda: defaultdict(int))
@@ -583,6 +604,21 @@ class Semantics:
             pending_obligations[obligation.target][obligation.source] += 1
 
         enabled_input_bindings = []
+        enabled_input_bindings_weight = ""
+        # get all enabled input bindings
+        for activity, sources in pending_obligations.items():
+            # Get the set of source activities
+            source_activities = set(sources.keys())
+            # Check if any input binding is exactly satisfied by the pending obligations
+            for input_binding in self.causal_net.input_bindings[activity]:
+                # Skip if input binding doesn't match the source activities
+                if not set(input_binding).issubset(source_activities):
+                    continue
+                enabled_input_bindings_weight += self.causal_net.get_input_binding_weight(activity,input_binding)
+                enabled_input_bindings_weight += "+"
+                enabled_input_bindings.append(input_binding)
+        enabled_input_bindings_weight = enabled_input_bindings_weight[:-1]
+
         # For all activities with pending obligations
         for activity, sources in pending_obligations.items():
             # Get the set of source activities
@@ -593,31 +629,24 @@ class Semantics:
                 if not set(input_binding).issubset(source_activities):
                     continue
 
-                enabled_input_bindings.append(input_binding)
                 # For matching input binding, consider all possible output bindings
                 for output_binding in self.causal_net.output_bindings[activity]:
                     binding = Binding(activity, input_binding, output_binding)
                     if self.is_enabled(binding, current_state):
-                        symbolic_probability = ""
+                        symbolic_probability = "1*"
                         if len(enabled_input_bindings) > 1:
                             input_weight = self.causal_net.get_input_binding_weight(binding.activity, binding.input_set)
-                            symbolic_probability = str(input_weight)
+                            symbolic_probability += str(input_weight)
                             symbolic_probability += "/("
-                            symbolic_probability += self.causal_net.get_total_input_binding_weight(binding.activity)
+                            symbolic_probability += enabled_input_bindings_weight
                             symbolic_probability += ")*"
-                        else:
-                            symbolic_probability = "1*"
-
                         if len(self.causal_net.output_bindings[binding.activity]) > 1:
                             output_weight = self.causal_net.get_output_binding_weight(binding.activity,   binding.output_set)
                             symbolic_probability += str(output_weight)
                             symbolic_probability += "/("
                             symbolic_probability += self.causal_net.get_total_output_binding_weight(binding.activity)
-                            symbolic_probability += ")"
-                        else:
-                            symbolic_probability = symbolic_probability[:-1]
+                            symbolic_probability += ")*"
                         enabled_bindings[binding] = symbolic_probability
-
         return enabled_bindings
 
     def is_valid_binding_sequence(self, binding_sequence: List[Binding]) -> bool:
@@ -665,51 +694,153 @@ class Semantics:
         # Check if there are any pending obligations left
         return current_state.is_empty()
 
-    def generate_all_valid_binding_sequences(self, max_depth: int = 10):
+    # def generate_all_valid_binding_sequences(self, max_depth: int = 10):
+    #     """
+    #     Generate all valid binding sequences up to a certain depth.
+    #
+    #     Args:
+    #         max_depth: Maximum number of bindings in a sequence
+    #
+    #     Returns:
+    #         A list of all valid binding sequences
+    #     """
+    #     valid_sequences = dict()
+    #
+    #     def dfs(current_sequence, current_state, current_probability, depth):
+    #         # Base case: maximum depth reached
+    #         if depth >= max_depth:
+    #             valid_sequences[tuple(current_sequence)] = current_probability.replace("1*", "")[:-1]
+    #             return
+    #
+    #         # Get the dictionary of all enabled bindings
+    #         enabled_bindings = self.get_enabled_bindings(current_state)
+    #
+    #         for binding, probability in enabled_bindings.items():
+    #             # Create a new sequence by adding this binding
+    #             new_sequence = current_sequence + [binding]
+    #
+    #             # Calculate the new state
+    #             new_state = self.execute_binding(binding, current_state)
+    #             new_probability = current_probability
+    #             if probability != "1*":
+    #                 new_probability += probability
+    #                 new_probability += str("*")
+    #
+    #             # If the binding leads to the end activity and the state is empty,
+    #             # we've found a valid sequence
+    #             if binding.activity == self.causal_net.end_activity and new_state.is_empty():
+    #                 valid_sequences[tuple(new_sequence)] = new_probability.replace("1*", "")[:-1]
+    #                 continue
+    #
+    #             # Continue the search
+    #             dfs(new_sequence, new_state, new_probability, depth + 1)
+    #
+    #     # Start the search from the initial state
+    #     dfs([], self.initial_state(), "",0)
+    #
+    #     return valid_sequences
+
+    def generate_activity_sequences(self, max_sequence_num: int = 100, max_depth: int = 12):
         """
-        Generate all valid binding sequences up to a certain depth.
+        Generate all valid activity sequences up to a certain depth using breadth-first search (BFS).
+
+        BFS explores traces level by level, which ensures we find all possible traces
+        of a given length before moving to longer traces.
 
         Args:
-            max_depth: Maximum number of bindings in a sequence
+            max_depth: Maximum number of activities in a sequence
 
         Returns:
-            A list of all valid binding sequences
+            A dictionary mapping activity sequences to their probabilities
         """
-        valid_sequences = dict()
+        activity_sequences = {}
 
-        def dfs(current_sequence, current_state, current_probability, depth):
-            # Base case: maximum depth reached
-            if depth >= max_depth:
-                return
+        # Queue for BFS - each item contains:
+        # (current_sequence, current_state, current_probability, depth)
+        queue = []
 
-            # Get the dictionary of all enabled bindings
+        # Start from the initial state with empty sequence
+        queue.append(([], self.initial_state(), "1*", 0))
+
+        while queue:
+            # Get the next item from the queue (FIFO)
+            current_sequence, current_state, current_probability, depth = queue.pop(0)
+
+            # Skip if we've reached max depth
+            if len(activity_sequences) >= max_sequence_num or depth >= max_depth:
+                print("Maximum number of sequences or maximum depth reached, stopping search.")
+                return activity_sequences
+
+            # Get all enabled bindings for the current state
             enabled_bindings = self.get_enabled_bindings(current_state)
-
             for binding, probability in enabled_bindings.items():
-                # Create a new sequence by adding this binding
-                new_sequence = current_sequence + [binding]
+                # Create a new sequence by adding this binding's activity
+                new_sequence = current_sequence + [binding.activity]
 
-                # Calculate the new state
+                # Calculate the new state after executing the binding
                 new_state = self.execute_binding(binding, current_state)
+
+                # Update the probability
                 new_probability = current_probability
-                if probability != "1":
-                    new_probability += str("*")
-                    new_probability += probability
+                new_probability += probability
 
                 # If the binding leads to the end activity and the state is empty,
-                # we've found a valid sequence
+                # we've found a valid complete sequence
                 if binding.activity == self.causal_net.end_activity and new_state.is_empty():
-                    valid_sequences[tuple(new_sequence)] = new_probability[1:]
+                    # Clean up the probability expression
+                    activity_sequences[tuple(new_sequence)] = new_probability
                     continue
 
-                # Continue the search
-                dfs(new_sequence, new_state, new_probability, depth + 1)
+                # Add the new state to the queue for further exploration
+                queue.append((new_sequence, new_state, new_probability, depth + 1))
 
-        # Start the search from the initial state
-        dfs([], self.initial_state(), "",0)
+        return activity_sequences
 
-        return valid_sequences
-
+    # def generate_activity_sequences1(self, max_depth: int = 12):
+    #     """
+    #     Generate all valid binding sequences up to a certain depth.
+    #
+    #     Args:
+    #         max_depth: Maximum number of bindings in a sequence
+    #
+    #     Returns:
+    #         A list of all valid binding sequences
+    #     """
+    #     activity_sequences = dict()
+    #
+    #     def dfs(current_sequence, current_state, current_probability, depth):
+    #         # Base case: maximum depth reached
+    #         if depth >= max_depth:
+    #             # activity_sequences[tuple(current_sequence)] = current_probability.replace("1*", "")[:-1]
+    #             return
+    #
+    #         # Get the dictionary of all enabled bindings
+    #         enabled_bindings = self.get_enabled_bindings(current_state)
+    #
+    #         for binding, probability in enabled_bindings.items():
+    #             # Create a new sequence by adding this binding
+    #             new_sequence = current_sequence + [binding.activity]
+    #
+    #             # Calculate the new state
+    #             new_state = self.execute_binding(binding, current_state)
+    #             new_probability = current_probability
+    #             if probability != "1":
+    #                 new_probability += probability
+    #                 new_probability += str("*")
+    #
+    #             # If the binding leads to the end activity and the state is empty,
+    #             # we've found a valid sequence
+    #             if binding.activity == self.causal_net.end_activity and new_state.is_empty():
+    #                 activity_sequences[tuple(new_sequence)] = new_probability.replace("1*", "")[:-1]
+    #                 continue
+    #
+    #             # Continue the search
+    #             dfs(new_sequence, new_state, new_probability, depth + 1)
+    #
+    #     # Start the search from the initial state
+    #     dfs([], self.initial_state(), "1*",0)
+    #
+    #     return activity_sequences
 
 
 def project_binding_sequence_to_activities(binding_sequence: List[Binding]) -> List[str]:
@@ -722,8 +853,8 @@ def project_binding_sequence_to_activities(binding_sequence: List[Binding]) -> L
     Returns:
         A list of activity names representing the sequence
     """
-    return [binding.activity for binding in binding_sequence if binding.activity != "ARTIFICIAL_END" and binding.activity != "ARTIFICIAL_START"]
-
+    # return [binding.activity for binding in binding_sequence if binding.activity != "ARTIFICIAL_END" and binding.activity != "ARTIFICIAL_START"]
+    return [binding.activity for binding in binding_sequence]
 
 def print_scn_info(scn: SymbolicCausalNet):
     """
@@ -885,20 +1016,23 @@ def import_symbolic_causal_net_from_file(filename: str, default_weight: float = 
 # Example usage
 def example_usage():
     # Create a simple Stochastic C-net
-    symbolic_cn = import_symbolic_causal_net_from_xml("../data/road_heuristic.cnet")    # Print information about the C-net
+    symbolic_cn = import_symbolic_causal_net_from_xml("../data/abcd_concurrency.cnet")    # Print information about the C-net
     print_scn_info(symbolic_cn)
 
     # Create the semantics
     semantics = Semantics(symbolic_cn)
 
     # Generate all valid binding sequences
-    valid_sequences = semantics.generate_all_valid_binding_sequences()
+    valid_sequences = semantics.generate_activity_sequences()
 
     print(f"\nFound {len(valid_sequences)} valid binding sequences:")
     for sequence,probability in valid_sequences.items():
         # Project to activity sequence
-        activity_sequence = project_binding_sequence_to_activities(sequence)
-        print("Resulting trace and probability: ",probability,activity_sequence)
+
+        # activity_sequence = project_binding_sequence_to_activities(sequence)
+        print("Resulting trace and probability: ", sequence, probability)
+
+
 
 
 if __name__ == "__main__":
