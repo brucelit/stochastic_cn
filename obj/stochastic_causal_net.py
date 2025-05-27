@@ -44,6 +44,8 @@ class State:
             obligations: A dictionary mapping obligations to their counts
         """
         self.obligations = Counter()
+        self.is_start = False
+        self.is_final = False
         if obligations:
             self.obligations.update(obligations)
 
@@ -86,6 +88,12 @@ class State:
     def copy(self) -> 'State':
         """Create a copy of this state."""
         return State(self.obligations.copy())
+
+    def set_as_start(self) -> bool:
+        self.is_start = True
+
+    def set_as_final(self) -> bool:
+        self.is_final = True
 
 
 class Binding:
@@ -367,7 +375,15 @@ class Semantics:
 
     def initial_state(self) -> State:
         """Get the initial state (empty state)."""
+        state = State()
+        state.set_as_start()
         return State()
+
+    def final_state(self) -> State:
+        """Get the initial state (empty state)."""
+        state = State()
+        state.set_as_final()
+        return state
 
     def execute_binding(self, binding: Binding, current_state: State) -> State:
         """
@@ -419,7 +435,9 @@ class Semantics:
             for output_activity in binding.output_set:
                 obligation = Obligation(binding.activity, output_activity)
                 new_state.add_obligation(obligation)
-
+        # Special case for the end activity
+        if new_state.is_empty():
+            new_state.is_final = True
         return new_state
 
     def is_enabled(self, binding: Binding, current_state: State) -> bool:
@@ -479,14 +497,26 @@ class Semantics:
         """
         enabled_bindings = dict()
 
+        # ------------------------------------------------------
         # Special case for the start activity when state is empty
         if current_state.is_empty():
-            print("current state is empty", current_state)
-            for output_binding in self.causal_net.output_bindings[self.causal_net.start_activity]:
-                binding = Binding(self.causal_net.start_activity, set(), output_binding)
-                probability = self.causal_net.get_output_binding_weight(self.causal_net.start_activity, output_binding)
-                enabled_bindings[binding] = probability
-            return enabled_bindings
+            if len(self.causal_net.output_bindings[self.causal_net.start_activity]) == 1:
+                for output_binding in self.causal_net.output_bindings[self.causal_net.start_activity]:
+                    binding = Binding(self.causal_net.start_activity, set(), output_binding)
+                    enabled_bindings[binding] = 1
+                    return enabled_bindings
+            else:
+                total_probability = 0
+                for output_binding in self.causal_net.output_bindings[self.causal_net.start_activity]:
+                    # binding = Binding(self.causal_net.start_activity, set(), output_binding)
+                    total_probability += self.causal_net.get_output_binding_weight(self.causal_net.start_activity, output_binding)
+
+                for output_binding in self.causal_net.output_bindings[self.causal_net.start_activity]:
+                    binding = Binding(self.causal_net.start_activity, set(), output_binding)
+                    probability = self.causal_net.get_output_binding_weight(self.causal_net.start_activity, output_binding)
+                    enabled_bindings[binding] = probability/total_probability
+                return enabled_bindings
+        # ------------------------------------------------------
 
         # Count all pending obligations grouped by target activity
         pending_obligations = defaultdict(lambda: defaultdict(int))
@@ -494,6 +524,19 @@ class Semantics:
             pending_obligations[obligation.target][obligation.source] += 1
 
         enabled_input_bindings = []
+        enabled_input_bindings_weight = 0
+        # get all enabled input bindings
+        for activity, sources in pending_obligations.items():
+            # Get the set of source activities
+            source_activities = set(sources.keys())
+            # Check if any input binding is exactly satisfied by the pending obligations
+            for input_binding in self.causal_net.input_bindings[activity]:
+                # Skip if input binding doesn't match the source activities
+                if not set(input_binding).issubset(source_activities):
+                    continue
+                enabled_input_bindings_weight += self.causal_net.get_input_binding_weight(activity,input_binding)
+                enabled_input_bindings.append(input_binding)
+
         # For all activities with pending obligations
         for activity, sources in pending_obligations.items():
             # Get the set of source activities
@@ -504,30 +547,18 @@ class Semantics:
                 if not set(input_binding).issubset(source_activities):
                     continue
 
-                # # Check if we have exactly the right number of obligations
-                # match = True
-                # for source in input_binding:
-                #     if sources[source] != 1:  # We need exactly one obligation per source
-                #         match = False
-                #         break
-                #
-                # if not match:
-                #     continue
-
-                enabled_input_bindings.append(input_binding)
                 # For matching input binding, consider all possible output bindings
                 for output_binding in self.causal_net.output_bindings[activity]:
                     binding = Binding(activity, input_binding, output_binding)
                     if self.is_enabled(binding, current_state):
-                        enabled_bindings[binding] = 1
-
-        #compute the probability of each enabled binding
-        for binding in enabled_bindings:
-            input_weight = self.causal_net.get_input_binding_weight(binding.activity, binding.input_set)
-            output_weight = self.causal_net.get_output_binding_weight(binding.activity, binding.output_set)
-            enabled_bindings[binding] = input_weight * output_weight / (
-                        len(enabled_input_bindings) * len(self.causal_net.output_bindings[binding.activity]))
-
+                        symbolic_probability = 1
+                        if len(enabled_input_bindings) > 1:
+                            input_weight = self.causal_net.get_input_binding_weight(binding.activity, binding.input_set)
+                            symbolic_probability = input_weight/enabled_input_bindings_weight
+                        if len(self.causal_net.output_bindings[binding.activity]) > 1:
+                            output_weight = self.causal_net.get_output_binding_weight(binding.activity,   binding.output_set)
+                            symbolic_probability = output_weight/self.causal_net.get_total_output_binding_weight(binding.activity)
+                        enabled_bindings[binding] = symbolic_probability
         return enabled_bindings
 
 
@@ -639,11 +670,10 @@ def print_scn_info(scn: StochasticCausalNet):
     Args:
         scn: The StochasticCausalNet object to print
     """
-    print("Stochastic Causal Net Information:")
+    print("\nStochastic Causal Net Information:")
     print(f"Start Activity: {scn.start_activity}")
     print(f"End Activity: {scn.end_activity}")
     print(f"Activities: {scn.activities}")
-
     print("\nInput Bindings with Weights:")
     for activity in sorted(scn.activities):
         if activity != scn.start_activity:
@@ -708,7 +738,6 @@ def example_usage():
     for sequence,probability in valid_sequences.items():
         # Project to activity sequence
         activity_sequence = project_binding_sequence_to_activities(sequence)
-        print("Resulting trace and probability: ",probability,activity_sequence)
 
 
 if __name__ == "__main__":

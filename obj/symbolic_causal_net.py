@@ -4,6 +4,9 @@ from typing import Set, List
 from collections import defaultdict, Counter
 from sympy import symbols
 
+from obj.stochastic_causal_net import StochasticCausalNet
+
+
 class Obligation:
     """
     An obligation in a Causal-net represents a commitment that an activity
@@ -204,9 +207,13 @@ class SymbolicCausalNet:
         # Start activity has no input bindings
         empty_set = frozenset()
         self.input_bindings[start_activity].add(empty_set)
+        self.input_binding_weights[start_activity][empty_set] = "1"
+
         # End activity has no output bindings
         self.output_bindings[end_activity].add(empty_set)
+        self.output_binding_weights[end_activity][empty_set] = "1"
         self.param_mapping = self.assign_parameterized_weights()
+
 
 
     def add_activity(self, activity: str) -> None:
@@ -252,42 +259,6 @@ class SymbolicCausalNet:
 
         binding_frozenset = frozenset(binding)
         self.output_bindings[activity].add(binding_frozenset)
-
-    # def update_input_binding_weight(self, activity: str, binding: Set[str], weight=1.0) -> None:
-    #     """
-    #     Update the weight of an existing input binding.
-    #
-    #     Args:
-    #         activity: The target activity
-    #         binding: The input binding to update
-    #         weight: The new weight
-    #     """
-    #     if weight < 0:
-    #         raise ValueError("Weight must be non-negative")
-    #
-    #     binding_frozenset = frozenset(binding)
-    #     if binding_frozenset not in self.input_bindings[activity]:
-    #         raise ValueError(f"Input binding {binding} does not exist for activity {activity}")
-    #
-    #     self.input_binding_weights[activity][binding_frozenset] = weight
-    #
-    # def update_output_binding_weight(self, activity: str, binding: Set[str], weight) -> None:
-    #     """
-    #     Update the weight of an existing output binding.
-    #
-    #     Args:
-    #         activity: The source activity
-    #         binding: The output binding to update
-    #         weight: The new weight
-    #     """
-    #     if weight < 0:
-    #         raise ValueError("Weight must be non-negative")
-    #
-    #     binding_frozenset = frozenset(binding)
-    #     if binding_frozenset not in self.output_bindings[activity]:
-    #         raise ValueError(f"Output binding {binding} does not exist for activity {activity}")
-
-        # self.output_binding_weights[activity][binding_frozenset] = weight
 
     def get_input_binding_weight(self, activity: str, binding: frozenset[str]) -> str:
         """
@@ -739,8 +710,7 @@ class Semantics:
     #     dfs([], self.initial_state(), "",0)
     #
     #     return valid_sequences
-
-    def generate_activity_sequences(self, max_sequence_num: int = 100, max_depth: int = 12):
+    def generate_activity_sequences(self, max_sequence_num: int = 500, max_depth: int = 30):
         """
         Generate all valid activity sequences up to a certain depth using breadth-first search (BFS).
 
@@ -1033,6 +1003,51 @@ def example_usage():
         print("Resulting trace and probability: ", sequence, probability)
 
 
+def convert_symbolic_to_stochastic(symbolic_net: SymbolicCausalNet,
+                                   param_result:list,
+                                   param_mapping,
+                                   var_idx2name_map) -> StochasticCausalNet:
+    """
+    Convert a SymbolicCausalNet to a StochasticCausalNet using a dictionary of weight values.
+
+    Args:
+        symbolic_net: The SymbolicCausalNet to convert
+        weight_dict: Dictionary mapping weight names (e.g., 'w1', 'w2') to float values
+
+    Returns:
+        A StochasticCausalNet with the same structure but with float weights
+    """
+    # Create a new StochasticCausalNet with the same start and end activities
+    stochastic_net = StochasticCausalNet(symbolic_net.start_activity, symbolic_net.end_activity)
+
+    # Add all activities from the symbolic net
+    for activity in symbolic_net.activities:
+        if activity != symbolic_net.start_activity and activity != symbolic_net.end_activity:
+            stochastic_net.add_activity(activity)
+
+    # Copy input bindings with converted weights
+    for activity in symbolic_net.activities:
+        if activity == symbolic_net.start_activity:
+            continue  # Skip start activity as it has no input bindings
+
+        for binding in symbolic_net.input_bindings[activity]:
+            # Get the symbolic weight
+            symbolic_weight = symbolic_net.input_binding_weights[activity][binding]
+            # Add the input binding with the float weight
+            stochastic_net.add_input_binding(activity, set(binding), param_result[int(symbolic_weight[1:])])
+
+    # Copy output bindings with converted weights
+    for activity in symbolic_net.activities:
+        if activity == symbolic_net.end_activity:
+            continue  # Skip end activity as it has no output bindings
+
+        for binding in symbolic_net.output_bindings[activity]:
+            # Get the symbolic weight
+            symbolic_weight = symbolic_net.output_binding_weights[activity][binding]
+            # Add the output binding with the float weight
+            stochastic_net.add_output_binding(activity, set(binding), param_result[int(symbolic_weight[1:])])
+
+    return stochastic_net
 
 
 if __name__ == "__main__":

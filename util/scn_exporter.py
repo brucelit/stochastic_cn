@@ -5,7 +5,7 @@ from typing import Dict, Set
 from obj.stochastic_causal_net import StochasticCausalNet, print_scn_info
 
 
-def export_to_cnet(causal_net, filename: str) -> None:
+def export_to_sc_net(causal_net, filename: str) -> None:
     """
     Export the causal net to a .cnet XML file.
 
@@ -64,6 +64,7 @@ def export_to_cnet(causal_net, filename: str) -> None:
         f.write(final_xml)
 
     print(f"Exported causal net to {filename}")
+
 
 
 def _create_activity_id_mapping(causal_net) -> Dict[str, int]:
@@ -321,7 +322,7 @@ def example_causal_net():
     print_scn_info(cnet)
 
     # Export to .cnet file
-    export_to_cnet(cnet, "../data/abcd.cnet")
+    export_to_sc_net(cnet, "../data/weighted_abcd.cnet")
 
     # Test round-trip by loading it back
     # loaded_cnet = load_cnet_from_xml("../data/exported_abcd.cnet")

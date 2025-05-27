@@ -1,6 +1,6 @@
 import xml.etree.ElementTree as ET
 from typing import Dict, Set, List, Tuple
-from obj.stochastic_causal_net import StochasticCausalNet,  project_binding_sequence_to_activities, \
+from obj.stochastic_causal_net import StochasticCausalNet, project_binding_sequence_to_activities, \
     Semantics, print_scn_info
 
 
@@ -10,7 +10,7 @@ def import_scn_from_xml(xml_content: str, default_weight: float = 1.0) -> Stocha
 
     Args:
         xml_content: XML string containing the C-net definition
-        default_weight: Default weight to assign to all bindings (default: 1.0)
+        default_weight: Default weight to assign to bindings without explicit weights (default: 1.0)
 
     Returns:
         A StochasticCausalNet object representing the imported model
@@ -73,15 +73,35 @@ def import_scn_from_xml(xml_content: str, default_weight: float = 1.0) -> Stocha
 
         for input_set_elem in input_node_elem.findall('./inputSet'):
             input_set = set()
+            weights = {}
+
             for input_node in input_set_elem.findall('./node'):
                 input_id = input_node.get('id')
                 if input_id in nodes:
                     input_name = nodes[input_id]
                     input_set.add(input_name)
 
+                    # Extract weight if present
+                    weight_attr = input_node.get('weight')
+                    if weight_attr is not None:
+                        try:
+                            weights[input_name] = float(weight_attr)
+                        except ValueError:
+                            print(f"Warning: Invalid weight value '{weight_attr}' for input binding, using default")
+                            weights[input_name] = default_weight
+                    else:
+                        weights[input_name] = default_weight
+
             if input_set:
+                # Calculate binding weight
+                # Use average of individual weights or default if no weights specified
+                if weights:
+                    binding_weight = sum(weights.values()) / len(weights)
+                else:
+                    binding_weight = default_weight
+
                 try:
-                    scn.add_input_binding(node_name, input_set, default_weight)
+                    scn.add_input_binding(node_name, input_set, binding_weight)
                 except ValueError as e:
                     print(f"Warning: {e}")
 
@@ -98,15 +118,35 @@ def import_scn_from_xml(xml_content: str, default_weight: float = 1.0) -> Stocha
 
         for output_set_elem in output_node_elem.findall('./outputSet'):
             output_set = set()
+            weights = {}
+
             for output_node in output_set_elem.findall('./node'):
                 output_id = output_node.get('id')
                 if output_id in nodes:
                     output_name = nodes[output_id]
                     output_set.add(output_name)
 
+                    # Extract weight if present
+                    weight_attr = output_node.get('weight')
+                    if weight_attr is not None:
+                        try:
+                            weights[output_name] = float(weight_attr)
+                        except ValueError:
+                            print(f"Warning: Invalid weight value '{weight_attr}' for output binding, using default")
+                            weights[output_name] = default_weight
+                    else:
+                        weights[output_name] = default_weight
+
             if output_set:
+                # Calculate binding weight
+                # Use average of individual weights or default if no weights specified
+                if weights:
+                    binding_weight = sum(weights.values()) / len(weights)
+                else:
+                    binding_weight = default_weight
+
                 try:
-                    scn.add_output_binding(node_name, output_set, default_weight)
+                    scn.add_output_binding(node_name, output_set, binding_weight)
                 except ValueError as e:
                     print(f"Warning: {e}")
 
@@ -119,7 +159,7 @@ def import_scn_from_file(filename: str, default_weight: float = 1.0) -> Stochast
 
     Args:
         filename: Path to the XML file
-        default_weight: Default weight to assign to all bindings (default: 1.0)
+        default_weight: Default weight to assign to bindings without explicit weights (default: 1.0)
 
     Returns:
         A StochasticCausalNet object representing the imported model
@@ -149,16 +189,16 @@ def analyze_imported_scn(scn: StochasticCausalNet):
     probability_sum = 0.0
     # Print all unique activity sequences
     print(f"\nFound {len(valid_sequences)} valid binding sequences:")
-    for sequence,probability in valid_sequences.items():
+    for sequence, probability in valid_sequences.items():
         # Project to activity sequence
         activity_sequence = project_binding_sequence_to_activities(sequence)
-        print("Resulting trace and probability: ",probability,activity_sequence)
+        print("Resulting trace and probability: ", probability, activity_sequence)
         probability_sum += probability
 
 
 if __name__ == "__main__":
     # Import the Weighted Causal Net
-    scn = import_scn_from_xml("../data/abcd.cnet")
+    scn = import_scn_from_xml("../data/weighted_abcd.cnet")
 
     # Analyze the imported Causal Net
     analyze_imported_scn(scn)

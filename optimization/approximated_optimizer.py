@@ -1,4 +1,5 @@
 import csv
+import math
 import time
 
 import numba
@@ -6,8 +7,10 @@ import scipy
 import numpy as np
 
 from collections import defaultdict
+
+from obj.stochastic_reachability_graph import StochasticReachabilityGraph
 from obj.symbolic_causal_net import import_symbolic_causal_net_from_xml, Semantics, \
-    project_binding_sequence_to_activities
+    project_binding_sequence_to_activities, convert_symbolic_to_stochastic
 from util.stochastic_language import import_slang, compute_markov_abstraction
 from util.symbolic_conversion import get_inverse_poland_expression, clean_expression
 from itertools import chain
@@ -57,6 +60,7 @@ def calculate_inverse_poland_expression_numba(inverse_poland_expression, constan
 
 def get_obj_func(markovian_slang, symbolic_cn, k):
     param_mapping = symbolic_cn.assign_parameterized_weights()
+    print("Parameter mapping: ", param_mapping)
 
     # Create the semantics
     semantics = Semantics(symbolic_cn)
@@ -64,7 +68,7 @@ def get_obj_func(markovian_slang, symbolic_cn, k):
     # Generate all valid binding sequences
     sampled_activity_sequences = semantics.generate_activity_sequences()
 
-    print("sampled_activity_sequences num: ", len(sampled_activity_sequences))
+    print(len(sampled_activity_sequences), " valid activity sequences generated.")
 
     total_freq4sub_trace_dict = defaultdict(lambda:"")
     covered_sub_trace = set()
@@ -167,28 +171,28 @@ def uemsc_objective_function(inverse_poland_exprs, trace_probs, constants_lookup
     return obj_func
 
 
-# def optimize_with_basin_hopping(var_lst, end_var_lst, obj_func):
-#     """
-#     This function is used to optimize the objective function with basin hopping method,
-#     Regarding basin hopping global optimiser, refer to https://en.wikipedia.org/wiki/Basin-hopping
-#     :param var:
-#     :param obj_func:
-#     :return: the variable list that maximize uemsc^k measure
-#     """
-#     # add constraint such that every var is between 0 and 1
-#     bds = [(0.0001, 1) for _ in range(len(var_lst))]
-#     # for weights relevant to the artificial end, set it to the lower bound
-#     for idx in end_var_lst:
-#         bds[idx] = (0.0001, 0.0002)
-#     print(bds)
-#     # define the method and bound
-#     minimizer_kwargs = {"bounds": bds}
-#     # solve problem
-#     res = scipy.optimize.basinhopping(obj_func,
-#                                       var_lst,
-#                                       minimizer_kwargs=minimizer_kwargs)
-#     print("res of optimization: ", res.fun)
-#     return res.x
+def optimize_with_basin_hopping(var_lst, end_var_lst, obj_func):
+    """
+    This function is used to optimize the objective function with basin hopping method,
+    Regarding basin hopping global optimiser, refer to https://en.wikipedia.org/wiki/Basin-hopping
+    :param var:
+    :param obj_func:
+    :return: the variable list that maximize uemsc^k measure
+    """
+    # add constraint such that every var is between 0 and 1
+    bds = [(0.0001, 10) for _ in range(len(var_lst))]
+    # for weights relevant to the artificial end, set it to the lower bound
+    for idx in end_var_lst:
+        bds[idx] = (0.0001, 0.0002)
+    print(bds)
+    # define the method and bound
+    minimizer_kwargs = {"bounds": bds}
+    # solve problem
+    res = scipy.optimize.basinhopping(obj_func,
+                                      var_lst,
+                                      minimizer_kwargs=minimizer_kwargs)
+    print("res of optimization: ", res.fun)
+    return res.x
 
 
 def optimize_with_differential_evolution(var_lst, end_var_lst, obj_func):
@@ -208,89 +212,97 @@ def optimize_with_differential_evolution(var_lst, end_var_lst, obj_func):
     # solve problem
     res = scipy.optimize.differential_evolution(obj_func, bds)
     print("res of optimization: ", res.fun)
-    return res
+    return res.x
 
 def optimize_with_k_th_uemsc(slang, symbolic_cn, k):
-    log_markov_result = compute_markov_abstraction(slang, k)
-
-    sum = 0
-    for trace, v in log_markov_result.items():
-        # print(f"log trace: {trace}, with probability: {v}")
-        sum += v
+    markovian_slang = compute_markov_abstraction(slang, k)
 
     # get the objective function
-    objective_function, var_lst, var_idx2name_map, param_mapping = get_obj_func(log_markov_result, symbolic_cn, k)
+    objective_function, var_lst, var_idx2name_map, param_mapping = get_obj_func(markovian_slang, symbolic_cn, k)
 
     end_var_lst = []
     for k2,v2 in var_idx2name_map.items():
         if param_mapping[v2][0] == "ARTIFICIAL_END":
             end_var_lst.append(k2)
+    print("param_mapping: ", param_mapping)
 
     # run the optimization with basin hopping method
-    result = optimize_with_differential_evolution(var_lst, end_var_lst, objective_function)
-    param_result = result.x
+    param_result = optimize_with_basin_hopping(var_lst, end_var_lst, objective_function)
+    print("param_result: ", param_result)
+
     # return param_result
+    scn = convert_symbolic_to_stochastic(symbolic_cn,
+                                         param_result,
+                                         param_mapping,
+                                         var_idx2name_map)
+    # print_scn_info(scn)
+    # export_to_sc_net(scn, "../data/weighted_bcde.cnet")
 
-    count = 0
-    # print("param result: ", param_result)
-    # for i in range(len(param_result)):
-    #     if param_result[i] < 0.9:
-    #         count += 1
-    #     print(f"wight: {param_result[i]}, Weight: {param_mapping[var_idx2name_map[i]]}")
-    # print(f"Number of weights < 0.9: {count}")
+    activity_num = len(scn.activities)
+    stochastic_rg = StochasticReachabilityGraph(scn)
+    stochastic_rg.generate_reachability_graph(max_depth=50)
+    uemsc = 1
+    ER = 0
+    model_trace_sum = 0
+    log_trace_sum = 0
+    j1 = 0
+    total_cost = 0
 
+    for k, v in slang.items():
+        # get the prob of trace according to model
+        model_trace_prob = stochastic_rg.get_trace_prob(stochastic_rg.semantics.initial_state(), k)
+        # print(f"Trace: {len(k)}, Probability: {v}, Model Trace Probability: {model_trace_prob}")
+        uemsc -= max(v - model_trace_prob, 0)
+        if model_trace_prob > 0:
+            print(f"Trace: {k}, Probability: {v}, Model Trace Probability: {model_trace_prob}")
 
-def run_optimization_with_timing(slang, symbolic_cn, k_values):
-    """
-    Run optimization for multiple k values, track timing and results
+            model_trace_sum += model_trace_prob
+            log_trace_sum += v
+            temp_sum = v + model_trace_prob
+            j1 += v * math.log2(2 * v / temp_sum) + model_trace_prob * math.log2(2 * model_trace_prob / temp_sum)
+            total_cost += -v * math.log2(model_trace_prob)
+        else:
+            total_cost += v * (1 + len(k)) * math.log2(1 + activity_num)
 
-    Args:
-        slang: The stochastic language object
-        symbolic_cn: The symbolic causal net
-        k_values: List of k values to test
+    ER += -model_trace_sum * math.log2(model_trace_sum) - (1 - model_trace_sum) * math.log2(1 - model_trace_sum)
+    ER += total_cost
+    # state2probability = reachability_graph.get_state_probability_vector()
+    # sub_trace_frequencies, total_freq = reachability_graph.generate_markovian_frequency(markovian_slang, state2probability, k)
+    # print("model_trace_sum: ", model_trace_sum)
+    # print("log_trace_sum: ", float(log_trace_sum), "type: ", type(log_trace_sum))
+    temp_j = float(log_trace_sum)
+    temp_jssc = (j1 + 1.0 - model_trace_sum + 1.0 - temp_j) / 2.0
+    jssc = math.sqrt(temp_jssc)
 
-    Returns:
-        List of dictionaries containing results for each k
-    """
-    results = []
+    second_markovian_slang = compute_markov_abstraction(slang, 2)
+    state2probability = stochastic_rg.get_state_probability_vector()
+    print("state to probability vector: ", state2probability)
+    sub_trace_frequencies, total_freq = stochastic_rg.generate_markovian_frequency(second_markovian_slang,
+                                                                                   state2probability, 2)
+    second_uemsc = 1
+    model_sub_trace_sum = 0
+    for k, v in sub_trace_frequencies.items():
+        print("Sub trace: ", k, " with model prob: ", v, " and log probability: ", second_markovian_slang[k])
 
-    for k in k_values:
-        print(f"Running optimization for k={k}")
-        start_time = time.time()
+        model_sub_trace_sum += v
+        second_uemsc -= max(second_markovian_slang[k] - v, 0)
+    print("model_sub_trace_sum: ", model_sub_trace_sum)
+    print("second_uemsc: ", second_uemsc)
 
-        # Get the Markov abstraction for the given k
-        log_markov_result = compute_markov_abstraction(slang, k)
-
-        # Get the objective function
-        objective_function, var_lst, var_idx2name_map, param_mapping = get_obj_func(log_markov_result, symbolic_cn, k)
-
-        # Get the end variable list
-        end_var_lst = []
-        for k2, v2 in var_idx2name_map.items():
-            if param_mapping[v2][0] == "ARTIFICIAL_END":
-                end_var_lst.append(k2)
-
-        # Run the optimization
-        optimization_result = optimize_with_differential_evolution(var_lst, end_var_lst, objective_function)
-
-        # Calculate elapsed time
-        elapsed_time = time.time() - start_time
-
-        # Store results
-        result_dict = {
-            'k': k,
-            'runtime_seconds': elapsed_time,
-            'fun_value': optimization_result.fun,
-            'success': optimization_result.success,
-            'n_iter': optimization_result.nit,
-            'params': optimization_result.x.tolist()  # Convert numpy array to list for CSV storage
-        }
-        results.append(result_dict)
-
-        print(f"Completed k={k} in {elapsed_time:.2f} seconds")
-
-    return results
-
+    third_markovian_slang = compute_markov_abstraction(slang, 3)
+    state2probability = stochastic_rg.get_state_probability_vector()
+    sub_trace_frequencies, total_freq = stochastic_rg.generate_markovian_frequency(third_markovian_slang,
+                                                                                   state2probability, 3)
+    third_uemsc = 1
+    model_sub_trace_sum = 0
+    for k, v in sub_trace_frequencies.items():
+        model_sub_trace_sum += v
+        third_uemsc -= max(third_markovian_slang[k] - v, 0)
+    print("model_sub_trace_sum: ", model_sub_trace_sum)
+    print("third_uemsc: ", third_uemsc)
+    print("uemsc: ", float(uemsc))
+    print("jssc: ", 1.0 - jssc)
+    print("ER: ", ER)
 
 def save_results_to_csv(results, filename="optimization_results.csv"):
     """
@@ -342,22 +354,23 @@ if __name__ == "__main__":
     #
     # model_path = '../data/abcd.cnet'
 
-    log_path = '../data/bpi19.slang'
+    log_path = '../data/domestic.slang'
     slang = import_slang(log_path)
 
-    model_path = '../data/bpi19_hm.cnet'
+    model_path = '../data/domestic_hm.cnet'
 
     symbolic_cn = import_symbolic_causal_net_from_xml(model_path)
     symbolic_cn.assign_parameterized_weights()
     # Define k values to test
-    k_values = [2, 3,4,5,6]
+    # k_values = [2,3]
 
     # Run optimizations with timing
-    results = run_optimization_with_timing(slang, symbolic_cn, k_values)
+    # results = run_optimization_with_timing(slang, symbolic_cn, k_values)
 
     # Save results to CSV
-    save_results_to_csv(results, "bpi19_optimization_k_results.csv")
-    # binding_weights = optimize_with_k_th_uemsc(slang, symbolic_cn, k)
+    # save_results_to_csv(results, "international_approximation_k.csv")
+    k = 2
+    binding_weights = optimize_with_k_th_uemsc(slang, symbolic_cn, k)
     # scn = symbolic_cn.construct_scn(binding_weights)
 
 #    # Export the SCN to a file
