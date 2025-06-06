@@ -128,13 +128,11 @@ class SymbolicReachabilityGraph:
 
             # Get all enabled bindings for current state
             enabled_bindings = self.semantics.get_enabled_bindings(current_state)
-
             # Process each enabled binding
             for binding, probability in enabled_bindings.items():
                 if probability == "":
                     probability = str(1)
                 edge_label = f"{binding.activity}\np={probability}"
-
 
                 # Execute the binding to get the next state
                 try:
@@ -166,7 +164,6 @@ class SymbolicReachabilityGraph:
 
                 except ValueError as e:
                     print(f"Error executing binding {binding}: {e}")
-
         return self.graph
 
     def get_sub_trace_freq(self, source_state, trace, trace_length):
@@ -239,8 +236,10 @@ class SymbolicReachabilityGraph:
             if depth >= trace_length:
                 probability4sub_trace.append(current_probability)
                 return
+            
             if current_state.is_final and depth < trace_length:
                 return
+
             # Get the dictionary of all enabled bindings
             enabled_bindings = self.semantics.get_enabled_bindings(current_state)
             for binding, probability in enabled_bindings.items():
@@ -286,29 +285,25 @@ class SymbolicReachabilityGraph:
             NetworkX DiGraph representing the reachability graph
         """
         total_freq = ""
-
         sub_trace_probabilities = dict.fromkeys(markovian_slang, "")
-
         # Start with initial state
         initial_state = self.semantics.initial_state()
         initial_state_str = self._state_to_str(initial_state)
-
         # Add initial state to the graph
         self.state_mapping[initial_state_str] = 0  # Initial state gets index 0
 
         # Use BFS to explore all reachable states
-        queue = deque([(initial_state, initial_state_str, 0)])  # (state, state_str, depth)
+        queue = deque([(initial_state, initial_state_str, 0)])
         visited = {initial_state_str}
-
         state_index = 1  # Counter for state indices
 
         while queue:
             current_state, current_state_str, depth = queue.popleft()
-            
+            all_subtrace_frq = self.get_all_sub_trace_freq(current_state, k)
+            if all_subtrace_frq != "0":
             # get the total freq of all sub-traces of length k from current-state
-            temp_total_freq = "(" + self.get_all_sub_trace_freq(current_state, k)+")*(" +str(state2symbolic_probability[current_state_str]) + ")+"
-
-            total_freq += temp_total_freq
+                temp_total_freq = "(" +all_subtrace_frq+ ")*(" +str(state2symbolic_probability[current_state_str]) + ")+"
+                total_freq += temp_total_freq
             for trace, _ in markovian_slang.items():
                 sub_trace_prob = self.get_sub_trace_freq(current_state, trace, k)
                 if sub_trace_prob == "0":
@@ -319,7 +314,7 @@ class SymbolicReachabilityGraph:
                     if sub_trace_prob == "1":
                         sub_trace_probabilities[trace] += str("(")+str(state2symbolic_probability[current_state_str]) + str(")+")
                     else:
-                        sub_trace_probabilities[trace] += str("(")+str(state2symbolic_probability[current_state_str]) + ")*" + sub_trace_prob + str("+")
+                        sub_trace_probabilities[trace] += str("(")+str(state2symbolic_probability[current_state_str]) + ")*(" + sub_trace_prob + str(")+")
 
             # Stop if we've reached the maximum depth
             if depth >= max_depth:
@@ -370,6 +365,7 @@ class SymbolicReachabilityGraph:
                 sub_trace_probabilities[key] = "0"
             else:
                 sub_trace_probabilities[key] = v[:-1]
+
         return sub_trace_probabilities, total_freq[:-1]
 
 
@@ -383,36 +379,40 @@ class SymbolicReachabilityGraph:
         """
         # Get the number of states
         num_states = len(self.state_mapping)
-        print("Number of states:", num_states)
         # Create a matrix of empty strings
         matrix = np.empty((num_states, num_states), dtype=object)
         matrix.fill("0")
-        param_mapping = {}
-        reverse_param_mapping = {}
         # Fill the matrix with parameter information
         for source_idx, target_idx, activity, probability in self.transitions:
             if matrix[source_idx, target_idx] != '':
                 matrix[source_idx, target_idx] = probability
-
         for i in range(num_states):
             if matrix[i][i] == '0':
                 matrix[i][i] = "-1"
+            elif matrix[i][i] == '1':
+                matrix[i][i] = '0'
             else:
-                matrix[i][i] = matrix[i][i] + "-1"
+                matrix[i][i] = "("+matrix[i][i] + "-1)"
 
         counter = 0
+        param_mapping = {}
+        reverse_param_mapping = {}
         for source_idx, target_idx, activity, probability in self.transitions:
-            if matrix[source_idx, target_idx] == "0" or matrix[source_idx, target_idx] == "-1" or matrix[source_idx, target_idx] == "1":
+            if matrix[source_idx, target_idx] == "0" or matrix[source_idx, target_idx] == "-1"  or matrix[source_idx, target_idx] == "1":
                 continue
-            if probability in reverse_param_mapping.keys():
-                matrix[source_idx, target_idx] = reverse_param_mapping[probability]
+            if str(matrix[source_idx][target_idx]) in reverse_param_mapping.keys():
+                matrix[source_idx][target_idx] = reverse_param_mapping[matrix[source_idx][target_idx]]
                 continue
             param_name = f"a{counter}"
-            counter += 1
+            # map this index to a_{counter}
+            # print("param name: ", param_name, " for prob: ", probability, " source: ", source_idx, " target: ", target_idx)
+            param_mapping[param_name] = matrix[source_idx][target_idx]
+            reverse_param_mapping[str(matrix[source_idx][target_idx])] = param_name
             matrix[source_idx, target_idx] = param_name
-            param_mapping[param_name] = "("+probability+")"
-            reverse_param_mapping[probability] = param_name
+            counter += 1
 
+        # for i in range(len(matrix)):
+        #     print("after, matrix row {}: {}".format(i, matrix[i]))
         sympy_matrix, symbols = matrix_to_sympy(matrix.T)
         # Create reverse mapping from index to state string
         reverse_mapping = {idx: state for state, idx in self.state_mapping.items()}
@@ -420,11 +420,11 @@ class SymbolicReachabilityGraph:
         vector = [0 for i in range(num_states)]
         vector[0] = -1
         b = Matrix(vector)
-        result_matrix = sympy_matrix.solve(b)
+        result_matrix = sympy_matrix.solve(b,method='GE')
+
         state2symbolic_probability = {}
         for i in range(len(result_matrix)):
             state2symbolic_probability[reverse_mapping[i]] = replace_parameters(expand_powers(str(result_matrix[i])),param_mapping)
-
         return sympy_matrix, symbols, state2symbolic_probability
 
     def visualize(self, output_file: str = None, figsize: Tuple[int, int] = (12, 8)):
@@ -528,13 +528,6 @@ def matrix_to_sympy(matrix):
                 continue
             namespace = {matrix[i][j]: get_symbol(matrix[i][j])}
 
-            # Find and create all variables in the expression
-            # var_pattern = r'([oi]\d+)'
-            # variables = re.findall(var_pattern, cell)
-            # for var in variables:
-            # get_symbol(matrix[i][j])
-            # Create a namespace with all symbols for evaluation
-            # namespace = {var: get_symbol(var) for var in variables}
             try:
                 # Use sympy.sympify to convert the string expression to a SymPy expression
                 result[i, j] = sp.sympify(cell, locals=namespace)
@@ -609,4 +602,5 @@ def remove_one_multiply(expression):
     return expression
 
 if __name__ == "__main__":
-    symbolic_rg = example_reachability_graph()
+    test1 = remove_one_multiply("1*1")
+    print(test1)

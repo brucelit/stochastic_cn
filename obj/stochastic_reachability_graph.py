@@ -118,7 +118,6 @@ class StochasticReachabilityGraph:
         state_index = 1  # Counter for state indices
 
         while queue:
-
             current_state, current_state_str, depth = queue.popleft()
             if current_state.is_final:
                 continue
@@ -235,6 +234,7 @@ class StochasticReachabilityGraph:
             # Get the dictionary of all enabled bindings
             enabled_bindings = self.semantics.get_enabled_bindings(current_state)
             for binding, probability in enabled_bindings.items():
+
                 # Create a new sequence by adding this binding
                 if binding.activity == trace[0]:
                     # Calculate the new state
@@ -248,7 +248,7 @@ class StochasticReachabilityGraph:
         if len(probability4trace) == 1:
             return probability4trace[0]
         elif len(probability4trace) > 1:
-            print("serious mistake")
+            return sum(probability4trace)
         # If some valid binding sequences were found, return the sum
         else:
             return 0
@@ -293,8 +293,6 @@ class StochasticReachabilityGraph:
         # If no valid binding sequences were found, return 0
         if len(probability4sub_trace) == 0:
             return 0.0
-        elif len(probability4sub_trace) == 1:
-            return probability4sub_trace[0]
         else:
             # Return the sum of all probabilities
             return sum(probability4sub_trace)
@@ -394,8 +392,8 @@ class StochasticReachabilityGraph:
             matrix[i][i] -= 1.0
 
         # Create a numpy vector of length num_states
-        vector = [0 for i in range(num_states)]
-        vector[0] =-1
+        vector = [0.0 for i in range(num_states)]
+        vector[0] = -1.0
         # b = np.array(vector)
         reverse_mapping = {idx: state for state, idx in self.state_mapping.items()}
 
@@ -464,31 +462,29 @@ class StochasticReachabilityGraph:
 
 
 if __name__ == "__main__":
-    log_path = '../data/domestic.slang'
+    log_path = '../data/international.slang'
     # Load the data
     slang = import_slang(log_path)
-    # k = 6
+    k = 2
     # markovian_slang = compute_markov_abstraction(slang, k)
 
-    scn = import_scn_from_xml("../data/domestic_hm.cnet")
+    scn = import_scn_from_xml("../data/international_hm.cnet")
     activity_num = len(scn.activities)
     stochastic_rg = StochasticReachabilityGraph(scn)
     # visualize the reachability graph
-    stochastic_rg.generate_reachability_graph(max_depth=30)
-    stochastic_rg.visualize()
-
+    stochastic_rg.generate_reachability_graph(max_depth=50)
+    # stochastic_rg.visualize()
     uemsc = 1
     ER = 0
     model_trace_sum = 0
     log_trace_sum = 0
     j1 = 0
     total_cost = 0
-
     for k, v in slang.items():
         # get the prob of trace according to model
         model_trace_prob = stochastic_rg.get_trace_prob(stochastic_rg.semantics.initial_state(), k)
         # print(f"Trace: {len(k)}, Probability: {v}, Model Trace Probability: {model_trace_prob}")
-        uemsc -= max(v - model_trace_prob, 0)
+        uemsc -= max(float(v) - model_trace_prob, 0)
         if model_trace_prob >0:
             print("Trace: ", k, "Model Trace Probability: ", model_trace_prob)
             model_trace_sum += model_trace_prob
@@ -512,6 +508,7 @@ if __name__ == "__main__":
     second_markovian_slang = compute_markov_abstraction(slang, 2)
     state2probability = stochastic_rg.get_state_probability_vector()
     sub_trace_frequencies, total_freq = stochastic_rg.generate_markovian_frequency(second_markovian_slang, state2probability,2)
+    print("total freq: ", total_freq)
     second_uemsc = 1
     model_sub_trace_sum =0
     for k, v in sub_trace_frequencies.items():

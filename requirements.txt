@@ -1,0 +1,8 @@
+networkx~=3.4.2
+matplotlib~=3.10.0
+sympy~=1.13.3
+numpy~=1.26.4
+pandas~=2.2.3
+scipy~=1.15.2
+pm4py~=2.7.13.1
+numba~=0.61.2

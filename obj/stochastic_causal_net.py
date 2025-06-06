@@ -607,7 +607,7 @@ class Semantics:
         # Check if there are any pending obligations left
         return current_state.is_empty()
 
-    def generate_all_valid_binding_sequences(self, max_depth: int = 10):
+    def generate_all_valid_binding_sequences(self, max_depth: int = 15):
         """
         Generate all valid binding sequences up to a certain depth.
 

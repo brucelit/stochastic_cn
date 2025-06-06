@@ -105,9 +105,9 @@ def _add_input_bindings(causal_net, root: ET.Element, activity_to_id: Dict[str, 
                 node.set('id', str(activity_to_id[source_activity]))
 
                 # Add weight if available
-                weight = causal_net.input_binding_weights[activity][binding]
-                if weight != 1.0:  # Only add if not default
-                    node.set('weight', str(weight))
+                # weight = causal_net.input_binding_weights[activity][binding]
+                # if weight != 1.0:  # Only add if not default
+                #     node.set('weight', str(weight))
 
 
 def _add_output_bindings(causal_net, root: ET.Element, activity_to_id: Dict[str, int]) -> None:
@@ -136,9 +136,9 @@ def _add_output_bindings(causal_net, root: ET.Element, activity_to_id: Dict[str,
                 node.set('id', str(activity_to_id[target_activity]))
 
                 # Add weight if available
-                weight = causal_net.output_binding_weights[activity][binding]
-                if weight != 1.0:  # Only add if not default
-                    node.set('weight', str(weight))
+                # weight = causal_net.output_binding_weights[activity][binding]
+                # if weight != 1.0:  # Only add if not default
+                #     node.set('weight', str(weight))
 
 
 def _add_arcs(causal_net, root: ET.Element, activity_to_id: Dict[str, int], start_arc_id: int) -> None:
@@ -304,24 +304,36 @@ def example_causal_net():
     cnet.add_activity("c")
 
     # Add output bindings
-    cnet.add_output_binding("ARTIFICIAL_START", {"a"}, 1.24)
-    cnet.add_output_binding("a", {"b"}, 0.24)
-    cnet.add_output_binding("b", {"b"}, 1.24)
-    cnet.add_output_binding("b", {"c"}, 1.24)
-    cnet.add_output_binding("c", {"ARTIFICIAL_END"}, 1.24)
+    # cnet.add_output_binding("ARTIFICIAL_START", {"a"}, 1.24)
+    # cnet.add_output_binding("a", {"b"}, 0.24)
+    # cnet.add_output_binding("b", {"b"}, 1.24)
+    # cnet.add_output_binding("b", {"c"}, 1.24)
+    # cnet.add_output_binding("c", {"ARTIFICIAL_END"}, 1.24)
+    #
+    # # Add input bindings
+    # cnet.add_input_binding("a", {"ARTIFICIAL_START"}, 1.24)
+    # cnet.add_input_binding("b", {"a"}, 1.3)
+    # cnet.add_input_binding("b", {"b"}, 0.5)
+    # cnet.add_input_binding("c", {"b"}, 1.0)  # Default weight
+    # cnet.add_input_binding("ARTIFICIAL_END", {"c"}, 1.24)
+    cnet.add_output_binding("ARTIFICIAL_START", {"a"})
+    cnet.add_output_binding("a", {"b"})
+    cnet.add_output_binding("b", {"b"})
+    cnet.add_output_binding("b", {"c"})
+    cnet.add_output_binding("c", {"ARTIFICIAL_END"})
 
     # Add input bindings
-    cnet.add_input_binding("a", {"ARTIFICIAL_START"}, 1.24)
-    cnet.add_input_binding("b", {"a"}, 1.3)
-    cnet.add_input_binding("b", {"b"}, 0.5)
-    cnet.add_input_binding("c", {"b"}, 1.0)  # Default weight
-    cnet.add_input_binding("ARTIFICIAL_END", {"c"}, 1.24)
+    cnet.add_input_binding("a", {"ARTIFICIAL_START"})
+    cnet.add_input_binding("b", {"a"})
+    cnet.add_input_binding("b", {"b"})
+    cnet.add_input_binding("c", {"b"})  # Default weight
+    cnet.add_input_binding("ARTIFICIAL_END", {"c"})
 
     # Print info about the causal net
     print_cnet_info(cnet)
 
     # Export to .cnet file
-    # export_to_cnet(cnet, "../data/abcd.cnet")
+    export_to_cnet(cnet, "../data/test_abcd.cnet")
 
     # Test round-trip by loading it back
     # loaded_cnet = load_cnet_from_xml("../data/exported_abcd.cnet")

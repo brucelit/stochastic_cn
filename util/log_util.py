@@ -38,10 +38,11 @@ def get_stochastic_language(*args, **kwargs) -> Dict[List[str], fractions.Fracti
         vars = {variants_util.get_activities_from_variant(x): len(y) for x, y in vars.items()}
 
         all_values_sum = sum(vars.values())
+        new_slang = {}
         for x in vars:
-            # vars[x] = fractions.Fraction(vars[x], all_values_sum)
-            vars[x] = vars[x] / all_values_sum
-        return vars
+            new_trace = ('ARTIFICIAL_START',) + tuple(x) + ('ARTIFICIAL_END',)
+            new_slang[new_trace] = fractions.Fraction(vars[x], all_values_sum)
+        return new_slang
 
 
 def get_trace_weight_dict(*args, **kwargs) -> Dict[List[str], fractions.Fraction]:

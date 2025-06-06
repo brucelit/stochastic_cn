@@ -212,8 +212,6 @@ class SymbolicCausalNet:
         # End activity has no output bindings
         self.output_bindings[end_activity].add(empty_set)
         self.output_binding_weights[end_activity][empty_set] = "1"
-        self.param_mapping = self.assign_parameterized_weights()
-
 
 
     def add_activity(self, activity: str) -> None:
@@ -710,7 +708,7 @@ class Semantics:
     #     dfs([], self.initial_state(), "",0)
     #
     #     return valid_sequences
-    def generate_activity_sequences(self, max_sequence_num: int = 500, max_depth: int = 30):
+    def generate_activity_sequences(self, max_sequence_num: int = 20, max_depth: int = 22):
         """
         Generate all valid activity sequences up to a certain depth using breadth-first search (BFS).
 
@@ -733,12 +731,16 @@ class Semantics:
         queue.append(([], self.initial_state(), "1*", 0))
 
         while queue:
+
             # Get the next item from the queue (FIFO)
             current_sequence, current_state, current_probability, depth = queue.pop(0)
 
             # Skip if we've reached max depth
-            if len(activity_sequences) >= max_sequence_num or depth >= max_depth:
-                print("Maximum number of sequences or maximum depth reached, stopping search.")
+            if len(activity_sequences) >= max_sequence_num:
+                print("Maximum number of sequences reached, stopping search.")
+                return activity_sequences
+            if depth >= max_depth:
+                print("Maximum depth reached, stopping search.")
                 return activity_sequences
 
             # Get all enabled bindings for the current state
@@ -756,8 +758,10 @@ class Semantics:
 
                 # If the binding leads to the end activity and the state is empty,
                 # we've found a valid complete sequence
-                if binding.activity == self.causal_net.end_activity and new_state.is_empty():
+                if binding.activity == self.causal_net.end_activity and new_state.is_final:
                     # Clean up the probability expression
+
+                    # print("find a valid sequence and len of all: ", len(activity_sequences))
                     activity_sequences[tuple(new_sequence)] = new_probability
                     continue
 
@@ -962,8 +966,6 @@ def import_symbolic_causal_net_from_xml(xml_content: str, default_weight: float 
                     scn.add_output_binding(node_name, output_set)
                 except ValueError as e:
                     print(f"Warning: {e}")
-
-    scn.assign_parameterized_weights()
     return scn
 
 
@@ -986,8 +988,8 @@ def import_symbolic_causal_net_from_file(filename: str, default_weight: float = 
 # Example usage
 def example_usage():
     # Create a simple Stochastic C-net
-    symbolic_cn = import_symbolic_causal_net_from_xml("../data/abcd_concurrency.cnet")    # Print information about the C-net
-    print_scn_info(symbolic_cn)
+    symbolic_cn = import_symbolic_causal_net_from_xml("../data/converted_sepsis_fodina95.cnet")    # Print information about the C-net
+    # print_scn_info(symbolic_cn)
 
     # Create the semantics
     semantics = Semantics(symbolic_cn)
